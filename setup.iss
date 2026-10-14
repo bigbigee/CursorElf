@@ -1,16 +1,16 @@
-#define MyAppName "光标Elf"
-#define MyAppVersion "1.1.0"
+#define MyAppName "山竹 Cursor Elf"
+#define MyAppVersion "1.2.0"
 
 [Setup]
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=CursorElf
-SetupIconFile=guangbiaoelf.ico
-DefaultDirName=D:\光标Elf
+SetupIconFile=shazhu.ico
+DefaultDirName=D:\山竹CursorElf
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
 OutputDir=dist
-OutputBaseFilename=光标Elf-setup
+OutputBaseFilename=山竹CursorElf-setup-1.2.0
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

@@ -76,6 +76,11 @@ namespace ImeCursorDot
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)] public static extern IntPtr GetModuleHandle(string name);
         [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
 
+        [DllImport("user32.dll")]
+        public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        public const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOREDRAW = 0x0008, SWP_NOACTIVATE = 0x0010;
+
         // Mirrors Microsoft Pinyin's Shift-toggle: on Win11 24H2+ the legacy IMM32
         // API no longer exposes the IME Chinese/English mode, so we track taps ourselves.
         public static volatile bool MirrorChinese = true;
@@ -263,6 +268,7 @@ namespace ImeCursorDot
         public static int Dx = 10; // 水平间距（像素）
         public static int Dy = 12; // 垂直间距（像素）
         public static int Crop = 0; // 0=圆形 1=正方形（自定义图案裁剪形状）
+        public static int Speed = 10; // 跟随速度 1(慢)~10(即时)
 
         static string DataDir
         {
@@ -379,6 +385,7 @@ namespace ImeCursorDot
                     else if (k == "dx") { if (int.TryParse(v, out num) && num >= 0 && num <= 200) Dx = num; }
                     else if (k == "dy") { if (int.TryParse(v, out num) && num >= 0 && num <= 200) Dy = num; }
                     else if (k == "crop") { if (int.TryParse(v, out num) && num >= 0 && num <= 1) Crop = num; }
+                    else if (k == "speed") { if (int.TryParse(v, out num) && num >= 1 && num <= 10) Speed = num; }
                 }
             }
             catch (Exception) { }
@@ -397,7 +404,8 @@ namespace ImeCursorDot
                     "pos=" + Pos + "\r\n" +
                     "dx=" + Dx + "\r\n" +
                     "dy=" + Dy + "\r\n" +
-                    "crop=" + Crop + "\r\n");
+                    "crop=" + Crop + "\r\n" +
+                    "speed=" + Speed + "\r\n");
             }
             catch (Exception) { }
         }
@@ -444,7 +452,7 @@ namespace ImeCursorDot
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(310, 366);
+            ClientSize = new Size(310, 398);
             Font = new Font("Microsoft YaHei", 9f);
 
             Label l1 = new Label(); l1.Text = "中文时颜色"; l1.Location = new Point(16, 16); l1.AutoSize = true;
@@ -479,8 +487,13 @@ namespace ImeCursorDot
             numDy.Location = new Point(140, 182); numDy.Width = 60;
             numDy.Minimum = 0; numDy.Maximum = 200; numDy.Value = Settings.Dy;
 
-            Label l7 = new Label(); l7.Text = "中文图案"; l7.Location = new Point(16, 222); l7.AutoSize = true;
-            Button btnImgZh = new Button(); btnImgZh.Location = new Point(140, 218); btnImgZh.Size = new Size(120, 26);
+            Label l10 = new Label(); l10.Text = "跟随速度(慢1~快10)"; l10.Location = new Point(16, 220); l10.AutoSize = true;
+            NumericUpDown numSpeed = new NumericUpDown();
+            numSpeed.Location = new Point(140, 216); numSpeed.Width = 60;
+            numSpeed.Minimum = 1; numSpeed.Maximum = 10; numSpeed.Value = Settings.Speed;
+
+            Label l7 = new Label(); l7.Text = "中文图案"; l7.Location = new Point(16, 254); l7.AutoSize = true;
+            Button btnImgZh = new Button(); btnImgZh.Location = new Point(140, 250); btnImgZh.Size = new Size(120, 26);
             btnImgZh.Text = System.IO.File.Exists(Settings.ImagePath(true)) ? "已选择(点击更换)" : "选择图片…";
             string pendingZh = null, pendingEn = null;
             btnImgZh.Click += delegate
@@ -489,8 +502,8 @@ namespace ImeCursorDot
                 if (f != null) { pendingZh = f; btnImgZh.Text = "已选择(点击更换)"; }
             };
 
-            Label l8 = new Label(); l8.Text = "英文图案"; l8.Location = new Point(16, 256); l8.AutoSize = true;
-            Button btnImgEn = new Button(); btnImgEn.Location = new Point(140, 252); btnImgEn.Size = new Size(120, 26);
+            Label l8 = new Label(); l8.Text = "英文图案"; l8.Location = new Point(16, 288); l8.AutoSize = true;
+            Button btnImgEn = new Button(); btnImgEn.Location = new Point(140, 284); btnImgEn.Size = new Size(120, 26);
             btnImgEn.Text = System.IO.File.Exists(Settings.ImagePath(false)) ? "已选择(点击更换)" : "选择图片…";
             btnImgEn.Click += delegate
             {
@@ -498,14 +511,14 @@ namespace ImeCursorDot
                 if (f != null) { pendingEn = f; btnImgEn.Text = "已选择(点击更换)"; }
             };
 
-            Label l9 = new Label(); l9.Text = "图案裁剪形状"; l9.Location = new Point(16, 292); l9.AutoSize = true;
+            Label l9 = new Label(); l9.Text = "图案裁剪形状"; l9.Location = new Point(16, 324); l9.AutoSize = true;
             ComboBox cboCrop = new ComboBox();
-            cboCrop.Location = new Point(140, 288); cboCrop.Width = 80;
+            cboCrop.Location = new Point(140, 320); cboCrop.Width = 80;
             cboCrop.DropDownStyle = ComboBoxStyle.DropDownList;
             cboCrop.Items.AddRange(new object[] { "圆形", "正方形" });
             cboCrop.SelectedIndex = Settings.Crop;
 
-            Button btnDef = new Button(); btnDef.Text = "恢复默认圆点"; btnDef.Location = new Point(230, 286); btnDef.Size = new Size(72, 30);
+            Button btnDef = new Button(); btnDef.Text = "恢复默认圆点"; btnDef.Location = new Point(230, 318); btnDef.Size = new Size(72, 30);
             btnDef.Click += delegate
             {
                 Settings.ClearImages();
@@ -513,12 +526,13 @@ namespace ImeCursorDot
                 pendingZh = null; pendingEn = null;
             };
 
-            Button ok = new Button(); ok.Text = "确定"; ok.Location = new Point(60, 328); ok.Size = new Size(80, 28);
+            Button ok = new Button(); ok.Text = "确定"; ok.Location = new Point(60, 360); ok.Size = new Size(80, 28);
             ok.Click += delegate
             {
                 Settings.Zh = pickZh; Settings.En = pickEn;
                 Settings.Size = (int)numSize.Value; Settings.Pos = cboPos.SelectedIndex;
                 Settings.Dx = (int)numDx.Value; Settings.Dy = (int)numDy.Value;
+                Settings.Speed = (int)numSpeed.Value;
                 Settings.Crop = cboCrop.SelectedIndex;
                 if (pendingZh != null) Settings.SetImage(true, pendingZh);
                 if (pendingEn != null) Settings.SetImage(false, pendingEn);
@@ -526,7 +540,7 @@ namespace ImeCursorDot
                 DialogResult = DialogResult.OK;
                 Close();
             };
-            Button cancel = new Button(); cancel.Text = "取消"; cancel.Location = new Point(180, 328); cancel.Size = new Size(80, 28);
+            Button cancel = new Button(); cancel.Text = "取消"; cancel.Location = new Point(180, 360); cancel.Size = new Size(80, 28);
             cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
 
             Controls.Add(l1); Controls.Add(btnZh);
@@ -535,6 +549,7 @@ namespace ImeCursorDot
             Controls.Add(l4); Controls.Add(cboPos);
             Controls.Add(l5); Controls.Add(numDx);
             Controls.Add(l6); Controls.Add(numDy);
+            Controls.Add(l10); Controls.Add(numSpeed);
             Controls.Add(l7); Controls.Add(btnImgZh);
             Controls.Add(l8); Controls.Add(btnImgEn);
             Controls.Add(l9); Controls.Add(cboCrop); Controls.Add(btnDef);
@@ -620,7 +635,7 @@ namespace ImeCursorDot
             tray = new NotifyIcon();
             tray.Icon = iconZh;
             tray.ContextMenu = new ContextMenu(new MenuItem[] { autostart, new MenuItem("-"), markZh, markEn, new MenuItem("-"), settings, new MenuItem("-"), exit });
-            tray.Text = "输入法指示点  绿=中文  红=英文";
+            tray.Text = "山竹 Cursor Elf  绿=中文  红=英文";
             tray.Visible = true;
 
             timer = new System.Windows.Forms.Timer();
@@ -713,7 +728,25 @@ namespace ImeCursorDot
             int y = (Settings.Pos >= 2) ? cy - Settings.Dy - s : cy + Settings.Dy;
             x = Math.Min(Math.Max(x, lastBounds.Left), lastBounds.Right - s - 2);
             y = Math.Min(Math.Max(y, lastBounds.Top), lastBounds.Bottom - s - 2);
-            if (overlay.Left != x || overlay.Top != y) overlay.Location = new Point(x, y);
+            targetX = x; targetY = y;
+            if (Settings.Speed >= 10 && (overlay.Left != x || overlay.Top != y))
+                overlay.Location = new Point(x, y);
+        }
+
+        int targetX, targetY;
+
+        // Linear easing toward the cursor each tick; Speed 10 means "snap instantly".
+        void FollowStep()
+        {
+            if (Settings.Speed >= 10) return;
+            int x = overlay.Left, y = overlay.Top;
+            if (x == targetX && y == targetY) return;
+            double f = Settings.Speed / 10.0;
+            int nx = x + (int)Math.Round((targetX - x) * f);
+            int ny = y + (int)Math.Round((targetY - y) * f);
+            if (Math.Abs(targetX - nx) <= 1) nx = targetX;
+            if (Math.Abs(targetY - ny) <= 1) ny = targetY;
+            overlay.Location = new Point(nx, ny);
         }
 
         static bool AutoStartEnabled()
@@ -765,6 +798,11 @@ namespace ImeCursorDot
 
             Native.POINT c;
             if (Native.GetCursorPos(out c)) MoveDot(c.X, c.Y);
+            FollowStep();
+
+            // Keep the dot above other windows: re-assert topmost z-order every tick.
+            Native.SetWindowPos(overlay.Handle, Native.HWND_TOPMOST, 0, 0, 0, 0,
+                Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_NOREDRAW);
 
             if (lastChinese == null || Native.MirrorDirty || (tickCount & 3) == 0)
             {
