@@ -143,9 +143,11 @@ namespace ImeCursorDot
             return zhLayout && MirrorChinese;
         }
 
-        /// <summary>Render a premultiplied-BGRA circle and push it to a layered window.</summary>
-        public static void PaintDot(IntPtr hwnd, int size, Color fill)
+        /// <summary>Render a premultiplied-BGRA circle (or custom image) and push it to a layered window.</summary>
+        public static void PaintDot(IntPtr hwnd, int size, bool chinese)
         {
+            Image img = Settings.GetCustomImage(chinese);
+            Color fill = chinese ? Settings.Zh : Settings.En;
             using (Bitmap bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb))
             {
                 using (Graphics g = Graphics.FromImage(bmp))
@@ -153,8 +155,36 @@ namespace ImeCursorDot
                     g.Clear(Color.Transparent);
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     RectangleF rect = new RectangleF(1.5f, 1.5f, size - 3f, size - 3f);
-                    using (SolidBrush b = new SolidBrush(fill)) g.FillEllipse(b, rect);
-                    using (Pen p = new Pen(Color.FromArgb(230, 0, 0, 0), 1f)) g.DrawEllipse(p, rect);
+                    using (Pen p = new Pen(Color.FromArgb(230, 0, 0, 0), 1f))
+                    {
+                        if (img != null)
+                        {
+                            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                            if (Settings.Crop == 1)
+                            {
+                                RectangleF sq = new RectangleF(0.75f, 0.75f, size - 1.5f, size - 1.5f);
+                                g.DrawImage(img, sq);
+                                g.DrawRectangle(p, sq.X, sq.Y, sq.Width, sq.Height);
+                            }
+                            else
+                            {
+                                using (GraphicsPath clip = new GraphicsPath())
+                                {
+                                    clip.AddEllipse(rect);
+                                    g.SetClip(clip);
+                                    g.DrawImage(img, rect);
+                                    g.ResetClip();
+                                }
+                                g.DrawEllipse(p, rect);
+                            }
+                        }
+                        else
+                        {
+                            using (SolidBrush b = new SolidBrush(fill)) g.FillEllipse(b, rect);
+                            g.DrawEllipse(p, rect);
+                        }
+                    }
                 }
 
                 BitmapData data = bmp.LockBits(new Rectangle(0, 0, size, size),
@@ -232,6 +262,95 @@ namespace ImeCursorDot
         public static int Pos = 0; // 0=右下 1=左下 2=右上 3=左上（相对光标）
         public static int Dx = 10; // 水平间距（像素）
         public static int Dy = 12; // 垂直间距（像素）
+        public static int Crop = 0; // 0=圆形 1=正方形（自定义图案裁剪形状）
+
+        static string DataDir
+        {
+            get { return Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\ImeCursorDot"; }
+        }
+
+        public static string ImagePath(bool chinese)
+        {
+            return DataDir + (chinese ? "\\zh_custom.png" : "\\en_custom.png");
+        }
+
+        static Bitmap cachedZh, cachedEn;
+        static int cachedVersion = -1;
+        public static int ImagesVersion = 0;
+
+        public static Bitmap GetCustomImage(bool chinese)
+        {
+            if (cachedVersion != ImagesVersion)
+            {
+                if (cachedZh != null) { cachedZh.Dispose(); cachedZh = null; }
+                if (cachedEn != null) { cachedEn.Dispose(); cachedEn = null; }
+                cachedVersion = ImagesVersion;
+            }
+            Bitmap cache = chinese ? cachedZh : cachedEn;
+            if (cache != null)
+            {
+                // The user may delete the PNG outside the settings dialog; drop the cache then.
+                if (System.IO.File.Exists(ImagePath(chinese))) return cache;
+                cache.Dispose();
+                if (chinese) cachedZh = null; else cachedEn = null;
+            }
+            try
+            {
+                string path = ImagePath(chinese);
+                if (!System.IO.File.Exists(path)) return null;
+                byte[] data = System.IO.File.ReadAllBytes(path);
+                Bitmap loaded;
+                // Copy so the bitmap does not depend on the MemoryStream staying alive.
+                using (System.IO.MemoryStream ms = new System.IO.MemoryStream(data))
+                using (Bitmap t = new Bitmap(ms))
+                    loaded = new Bitmap(t);
+                if (chinese) cachedZh = loaded; else cachedEn = loaded;
+                return loaded;
+            }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>Copy the user's picture, center-cropped to a square PNG, into the app data dir.</summary>
+        public static bool SetImage(bool chinese, string sourceFile)
+        {
+            try
+            {
+                using (Bitmap src = new Bitmap(sourceFile))
+                {
+                    int side = Math.Min(src.Width, src.Height);
+                    if (side <= 0) return false;
+                    int sx = (src.Width - side) / 2, sy = (src.Height - side) / 2;
+                    using (Bitmap dst = new Bitmap(side, side, PixelFormat.Format32bppArgb))
+                    {
+                        using (Graphics g = Graphics.FromImage(dst))
+                            g.DrawImage(src, new Rectangle(0, 0, side, side),
+                                new Rectangle(sx, sy, side, side), GraphicsUnit.Pixel);
+                        System.IO.Directory.CreateDirectory(DataDir);
+                        dst.Save(ImagePath(chinese), ImageFormat.Png);
+                    }
+                }
+                ImagesVersion++;
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
+        public static void ClearImages()
+        {
+            try
+            {
+                string a = ImagePath(true), b = ImagePath(false);
+                if (System.IO.File.Exists(a)) System.IO.File.Delete(a);
+                if (System.IO.File.Exists(b)) System.IO.File.Delete(b);
+            }
+            catch (Exception) { }
+            ImagesVersion++;
+        }
+
+        public static bool HasAnyImage()
+        {
+            return System.IO.File.Exists(ImagePath(true)) || System.IO.File.Exists(ImagePath(false));
+        }
 
         static string FilePath()
         {
@@ -259,6 +378,7 @@ namespace ImeCursorDot
                     else if (k == "pos") { if (int.TryParse(v, out num) && num >= 0 && num <= 3) Pos = num; }
                     else if (k == "dx") { if (int.TryParse(v, out num) && num >= 0 && num <= 200) Dx = num; }
                     else if (k == "dy") { if (int.TryParse(v, out num) && num >= 0 && num <= 200) Dy = num; }
+                    else if (k == "crop") { if (int.TryParse(v, out num) && num >= 0 && num <= 1) Crop = num; }
                 }
             }
             catch (Exception) { }
@@ -276,7 +396,8 @@ namespace ImeCursorDot
                     "size=" + Size + "\r\n" +
                     "pos=" + Pos + "\r\n" +
                     "dx=" + Dx + "\r\n" +
-                    "dy=" + Dy + "\r\n");
+                    "dy=" + Dy + "\r\n" +
+                    "crop=" + Crop + "\r\n");
             }
             catch (Exception) { }
         }
@@ -323,52 +444,89 @@ namespace ImeCursorDot
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(300, 248);
+            ClientSize = new Size(310, 366);
             Font = new Font("Microsoft YaHei", 9f);
 
             Label l1 = new Label(); l1.Text = "中文时颜色"; l1.Location = new Point(16, 16); l1.AutoSize = true;
-            Button btnZh = new Button(); btnZh.Location = new Point(130, 12); btnZh.Size = new Size(80, 26);
+            Button btnZh = new Button(); btnZh.Location = new Point(140, 12); btnZh.Size = new Size(80, 26);
             btnZh.BackColor = pickZh;
             btnZh.Click += delegate { Color c = Pick(pickZh); if (!c.IsEmpty) { pickZh = c; btnZh.BackColor = c; } };
 
             Label l2 = new Label(); l2.Text = "英文时颜色"; l2.Location = new Point(16, 50); l2.AutoSize = true;
-            Button btnEn = new Button(); btnEn.Location = new Point(130, 46); btnEn.Size = new Size(80, 26);
+            Button btnEn = new Button(); btnEn.Location = new Point(140, 46); btnEn.Size = new Size(80, 26);
             btnEn.BackColor = pickEn;
             btnEn.Click += delegate { Color c = Pick(pickEn); if (!c.IsEmpty) { pickEn = c; btnEn.BackColor = c; } };
 
             Label l3 = new Label(); l3.Text = "大小(像素)"; l3.Location = new Point(16, 86); l3.AutoSize = true;
             NumericUpDown numSize = new NumericUpDown();
-            numSize.Location = new Point(130, 82); numSize.Width = 70;
+            numSize.Location = new Point(140, 82); numSize.Width = 70;
             numSize.Minimum = 4; numSize.Maximum = 40; numSize.Value = pickSize;
 
             Label l4 = new Label(); l4.Text = "位置(相对光标)"; l4.Location = new Point(16, 120); l4.AutoSize = true;
             ComboBox cboPos = new ComboBox();
-            cboPos.Location = new Point(130, 116); cboPos.Width = 110;
+            cboPos.Location = new Point(140, 116); cboPos.Width = 110;
             cboPos.DropDownStyle = ComboBoxStyle.DropDownList;
             cboPos.Items.AddRange(new object[] { "右下", "左下", "右上", "左上" });
             cboPos.SelectedIndex = pickPos;
 
             Label l5 = new Label(); l5.Text = "水平间距"; l5.Location = new Point(16, 154); l5.AutoSize = true;
             NumericUpDown numDx = new NumericUpDown();
-            numDx.Location = new Point(130, 150); numDx.Width = 60;
+            numDx.Location = new Point(140, 150); numDx.Width = 60;
             numDx.Minimum = 0; numDx.Maximum = 200; numDx.Value = Settings.Dx;
 
             Label l6 = new Label(); l6.Text = "垂直间距"; l6.Location = new Point(16, 186); l6.AutoSize = true;
             NumericUpDown numDy = new NumericUpDown();
-            numDy.Location = new Point(130, 182); numDy.Width = 60;
+            numDy.Location = new Point(140, 182); numDy.Width = 60;
             numDy.Minimum = 0; numDy.Maximum = 200; numDy.Value = Settings.Dy;
 
-            Button ok = new Button(); ok.Text = "确定"; ok.Location = new Point(50, 214); ok.Size = new Size(80, 28);
+            Label l7 = new Label(); l7.Text = "中文图案"; l7.Location = new Point(16, 222); l7.AutoSize = true;
+            Button btnImgZh = new Button(); btnImgZh.Location = new Point(140, 218); btnImgZh.Size = new Size(120, 26);
+            btnImgZh.Text = System.IO.File.Exists(Settings.ImagePath(true)) ? "已选择(点击更换)" : "选择图片…";
+            string pendingZh = null, pendingEn = null;
+            btnImgZh.Click += delegate
+            {
+                string f = PickFile();
+                if (f != null) { pendingZh = f; btnImgZh.Text = "已选择(点击更换)"; }
+            };
+
+            Label l8 = new Label(); l8.Text = "英文图案"; l8.Location = new Point(16, 256); l8.AutoSize = true;
+            Button btnImgEn = new Button(); btnImgEn.Location = new Point(140, 252); btnImgEn.Size = new Size(120, 26);
+            btnImgEn.Text = System.IO.File.Exists(Settings.ImagePath(false)) ? "已选择(点击更换)" : "选择图片…";
+            btnImgEn.Click += delegate
+            {
+                string f = PickFile();
+                if (f != null) { pendingEn = f; btnImgEn.Text = "已选择(点击更换)"; }
+            };
+
+            Label l9 = new Label(); l9.Text = "图案裁剪形状"; l9.Location = new Point(16, 292); l9.AutoSize = true;
+            ComboBox cboCrop = new ComboBox();
+            cboCrop.Location = new Point(140, 288); cboCrop.Width = 80;
+            cboCrop.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboCrop.Items.AddRange(new object[] { "圆形", "正方形" });
+            cboCrop.SelectedIndex = Settings.Crop;
+
+            Button btnDef = new Button(); btnDef.Text = "恢复默认圆点"; btnDef.Location = new Point(230, 286); btnDef.Size = new Size(72, 30);
+            btnDef.Click += delegate
+            {
+                Settings.ClearImages();
+                btnImgZh.Text = "选择图片…"; btnImgEn.Text = "选择图片…";
+                pendingZh = null; pendingEn = null;
+            };
+
+            Button ok = new Button(); ok.Text = "确定"; ok.Location = new Point(60, 328); ok.Size = new Size(80, 28);
             ok.Click += delegate
             {
                 Settings.Zh = pickZh; Settings.En = pickEn;
                 Settings.Size = (int)numSize.Value; Settings.Pos = cboPos.SelectedIndex;
                 Settings.Dx = (int)numDx.Value; Settings.Dy = (int)numDy.Value;
+                Settings.Crop = cboCrop.SelectedIndex;
+                if (pendingZh != null) Settings.SetImage(true, pendingZh);
+                if (pendingEn != null) Settings.SetImage(false, pendingEn);
                 Settings.Save();
                 DialogResult = DialogResult.OK;
                 Close();
             };
-            Button cancel = new Button(); cancel.Text = "取消"; cancel.Location = new Point(170, 214); cancel.Size = new Size(80, 28);
+            Button cancel = new Button(); cancel.Text = "取消"; cancel.Location = new Point(180, 328); cancel.Size = new Size(80, 28);
             cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
 
             Controls.Add(l1); Controls.Add(btnZh);
@@ -377,6 +535,9 @@ namespace ImeCursorDot
             Controls.Add(l4); Controls.Add(cboPos);
             Controls.Add(l5); Controls.Add(numDx);
             Controls.Add(l6); Controls.Add(numDy);
+            Controls.Add(l7); Controls.Add(btnImgZh);
+            Controls.Add(l8); Controls.Add(btnImgEn);
+            Controls.Add(l9); Controls.Add(cboCrop); Controls.Add(btnDef);
             Controls.Add(ok); Controls.Add(cancel);
             AcceptButton = ok; CancelButton = cancel;
         }
@@ -388,6 +549,16 @@ namespace ImeCursorDot
                 cd.FullOpen = true;
                 cd.Color = current;
                 return cd.ShowDialog() == DialogResult.OK ? cd.Color : Color.Empty;
+            }
+        }
+
+        static string PickFile()
+        {
+            using (OpenFileDialog ofd = new OpenFileDialog())
+            {
+                ofd.Filter = "图片文件 (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif";
+                ofd.Title = "选择图案图片";
+                return ofd.ShowDialog() == DialogResult.OK ? ofd.FileName : null;
             }
         }
     }
@@ -601,7 +772,7 @@ namespace ImeCursorDot
                 bool zh = Native.IsChineseMode();
                 if (lastChinese == null || lastChinese.Value != zh)
                 {
-                    Native.PaintDot(overlay.Handle, Settings.Size, zh ? Settings.Zh : Settings.En);
+                    Native.PaintDot(overlay.Handle, Settings.Size, zh);
                     tray.Icon = zh ? iconZh : iconEn;
                     lastChinese = zh;
                 }

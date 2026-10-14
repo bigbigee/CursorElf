@@ -1,9 +1,9 @@
-# 编译产物与调试文件
+# 编译产物与调试文件（exe 通过 GitHub Releases 分发，不入库）
 *.exe
-!dist/*.exe
 *.log
 bin/
 obj/
+dist/
 
 # 本地注册表导出（含个人信息，不上传）
 *.reg

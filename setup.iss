@@ -1,10 +1,11 @@
 #define MyAppName "光标Elf"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 
 [Setup]
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=CursorElf
+SetupIconFile=guangbiaoelf.ico
 DefaultDirName=D:\光标Elf
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
