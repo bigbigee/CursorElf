@@ -75,6 +75,7 @@ namespace ImeCursorDot
         [DllImport("user32.dll")] public static extern bool UnhookWindowsHookEx(IntPtr hhk);
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)] public static extern IntPtr GetModuleHandle(string name);
         [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
+        [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr hIcon);
 
         [DllImport("user32.dll")]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
@@ -254,7 +255,14 @@ namespace ImeCursorDot
                     using (SolidBrush b = new SolidBrush(fill)) g.FillEllipse(b, r);
                     using (Pen p = new Pen(Color.FromArgb(220, 0, 0, 0), 1f)) g.DrawEllipse(p, r);
                 }
-                return Icon.FromHandle(bmp.GetHicon());
+                // Clone detaches an owning copy; then the raw GDI handle is freed immediately.
+                IntPtr h = bmp.GetHicon();
+                try
+                {
+                    using (Icon tmp = Icon.FromHandle(h))
+                        return (Icon)tmp.Clone();
+                }
+                finally { DestroyIcon(h); }
             }
         }
     }
@@ -348,11 +356,23 @@ namespace ImeCursorDot
             try
             {
                 string a = ImagePath(true), b = ImagePath(false);
-                if (System.IO.File.Exists(a)) System.IO.File.Delete(a);
-                if (System.IO.File.Exists(b)) System.IO.File.Delete(b);
+                // Recycle bin first so a mistaken "恢复默认" is recoverable; fall back to delete.
+                if (System.IO.File.Exists(a)) DeleteGone(a);
+                if (System.IO.File.Exists(b)) DeleteGone(b);
             }
             catch (Exception) { }
             ImagesVersion++;
+        }
+
+        static void DeleteGone(string path)
+        {
+            try
+            {
+                Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(path,
+                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                    Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+            }
+            catch (Exception) { System.IO.File.Delete(path); }
         }
 
         public static bool HasAnyImage()
@@ -401,7 +421,9 @@ namespace ImeCursorDot
             {
                 string file = FilePath();
                 System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file));
-                System.IO.File.WriteAllText(file,
+                string tmp = file + ".tmp";
+                System.IO.File.WriteAllText(tmp,
+                    "ver=1\r\n" +
                     "zh=" + Zh.ToArgb().ToString("X8") + "\r\n" +
                     "en=" + En.ToArgb().ToString("X8") + "\r\n" +
                     "size=" + Size + "\r\n" +
@@ -412,6 +434,11 @@ namespace ImeCursorDot
                     "speed=" + Speed + "\r\n" +
                     "opacity=" + Opacity + "\r\n" +
                     "dance=" + (Dance ? "1" : "0") + "\r\n");
+                // Atomic replace: a crash mid-write can never truncate the live settings file.
+                if (System.IO.File.Exists(file))
+                    System.IO.File.Replace(tmp, file, null);
+                else
+                    System.IO.File.Move(tmp, file);
             }
             catch (Exception) { }
         }
@@ -553,6 +580,7 @@ namespace ImeCursorDot
             Button btnImgZh = new Button(); btnImgZh.Location = new Point(140, 318); btnImgZh.Size = new Size(120, 26);
             btnImgZh.Text = System.IO.File.Exists(Settings.ImagePath(true)) ? "已选择(点击更换)" : "选择图片…";
             string pendingZh = null, pendingEn = null;
+            bool pendingClear = false;
             btnImgZh.Click += delegate
             {
                 string f = PickFile();
@@ -578,9 +606,10 @@ namespace ImeCursorDot
             Button btnDef = new Button(); btnDef.Text = "恢复默认圆点"; btnDef.Location = new Point(230, 386); btnDef.Size = new Size(72, 30);
             btnDef.Click += delegate
             {
-                Settings.ClearImages();
-                btnImgZh.Text = "选择图片…"; btnImgEn.Text = "选择图片…";
-                pendingZh = null; pendingEn = null;
+                // Deletion is deferred to 确定 (and then goes to the recycle bin),
+                // so 取消 can never leave the user's custom images destroyed.
+                pendingClear = true; pendingZh = null; pendingEn = null;
+                btnImgZh.Text = "待恢复默认"; btnImgEn.Text = "待恢复默认";
             };
 
             LinkLabel lnk = new LinkLabel();
@@ -595,6 +624,16 @@ namespace ImeCursorDot
             Button ok = new Button(); ok.Text = "确定"; ok.Location = new Point(60, 460); ok.Size = new Size(80, 28);
             ok.Click += delegate
             {
+                bool imgFail = false;
+                if (pendingZh != null && !Settings.SetImage(true, pendingZh)) imgFail = true;
+                if (pendingEn != null && !Settings.SetImage(false, pendingEn)) imgFail = true;
+                if (imgFail)
+                {
+                    MessageBox.Show("部分图片无法应用（格式不支持或文件被占用），请重新选择。",
+                        "山竹 Cursor Elf", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return; // keep the dialog open so the user can fix the choice
+                }
+                if (pendingClear) Settings.ClearImages();
                 Settings.Zh = pickZh; Settings.En = pickEn;
                 Settings.Size = (int)numSize.Value; Settings.Pos = cboPos.SelectedIndex;
                 Settings.Dx = (int)numDx.Value; Settings.Dy = (int)numDy.Value;
@@ -602,9 +641,6 @@ namespace ImeCursorDot
                 Settings.Opacity = (int)numOpacity.Value;
                 Settings.Dance = chkDance.Checked;
                 Settings.Crop = cboCrop.SelectedIndex;
-                if (pendingZh != null) Settings.SetImage(true, pendingZh);
-                if (pendingEn != null) Settings.SetImage(false, pendingEn);
-                Settings.Save();
                 DialogResult = DialogResult.OK;
                 Close();
             };
@@ -651,6 +687,9 @@ namespace ImeCursorDot
 
     class AppContext : ApplicationContext
     {
+        public static AppContext Current;
+        static int balloonShown;
+
         readonly OverlayForm overlay;
         readonly System.Windows.Forms.Timer timer;
         readonly NotifyIcon tray;
@@ -668,10 +707,13 @@ namespace ImeCursorDot
 
         int targetX, targetY;
 
-        // Idle dance: after 60s without any mouse movement the dot orbits its
-        // anchor until the mouse moves again. 25ms ticks x 2400 = 60s.
-        const int IDLE_TICKS = 2400;
-        int idleTicks;
+        // Idle dance: after 60 seconds of wall-clock without any mouse OR keyboard
+        // activity the dot orbits its anchor until activity resumes.
+        // (Tick counting is unsafe here: WM_TIMER coalesces and drifts ~1.3x under load.)
+        const int IDLE_MS = 60000;
+        const int WATCHDOG_MS = 10000;
+        int lastActivityTick;
+        int lastMouseEvtTick;
         bool dancing;
         double dancePhase;
         int anchorX, anchorY;
@@ -682,6 +724,7 @@ namespace ImeCursorDot
 
         public AppContext()
         {
+            Current = this;
             overlay = new OverlayForm();
             trayIcon = LoadAppIcon();
 
@@ -731,6 +774,8 @@ namespace ImeCursorDot
             timer.Interval = 25;
             timer.Tick += Tick;
             autostart.Checked = AutoStartEnabled();
+            lastActivityTick = Environment.TickCount;
+            lastMouseEvtTick = Environment.TickCount;
             timer.Start();
             overlay.FormClosed += delegate
             {
@@ -756,10 +801,35 @@ namespace ImeCursorDot
 
         void ApplySettings()
         {
+            dancing = false;
+            lastActivityTick = Environment.TickCount;
             overlay.ClientSize = new Size(Settings.Size, Settings.Size);
             lastChinese = null;
             Native.POINT c;
             if (Native.GetCursorPos(out c)) MoveDot(c.X, c.Y);
+        }
+
+        public void OnThreadException(Exception ex)
+        {
+            Crash(ex);
+        }
+
+        static void Crash(object exObj)
+        {
+            try
+            {
+                string dir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\ImeCursorDot";
+                System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.AppendAllText(dir + "\\crash.log",
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " +
+                    (exObj == null ? "null" : exObj.ToString()) + "\r\n");
+                if (Current != null && Current.tray.Visible &&
+                    System.Threading.Interlocked.CompareExchange(ref balloonShown, 1, 0) == 0)
+                    Current.tray.ShowBalloonTip(8000, "山竹 Cursor Elf",
+                        "发生内部错误，程序会继续运行，详情见 crash.log。",
+                        ToolTipIcon.Warning);
+            }
+            catch (Exception) { }
         }
 
         void InstallHooks()
@@ -767,6 +837,7 @@ namespace ImeCursorDot
             UninstallHooks();
             if (mouseProc == null) mouseProc = OnMouse;
             mouseHook = Native.SetWindowsHookEx(14 /*WH_MOUSE_LL*/, mouseProc, Native.GetModuleHandle(null), 0);
+            lastMouseEvtTick = Environment.TickCount;
             Dbg("install mouse=" + mouseHook + " err=" + Marshal.GetLastWin32Error());
             pollShiftDown = pollAlone = false;
         }
@@ -774,12 +845,12 @@ namespace ImeCursorDot
         static object dbgLock = new object();
         static void Dbg(string s)
         {
+            if (!DebugLog.Enabled) return;
             try
             {
                 lock (dbgLock)
                 {
-                    System.IO.File.AppendAllText(
-                        AppDomain.CurrentDomain.BaseDirectory + "debug.log",
+                    System.IO.File.AppendAllText(DebugLog.File,
                         DateTime.Now.ToString("HH:mm:ss.fff") + " " + s + "\n");
                 }
             }
@@ -803,6 +874,7 @@ namespace ImeCursorDot
         {
             if (nCode >= 0 && wParam.ToInt64() == 0x200 /* WM_MOUSEMOVE */)
             {
+                lastMouseEvtTick = Environment.TickCount;
                 if (!mouseSeenLogged) { mouseSeenLogged = true; Dbg("mousemove hook ACTIVE"); }
                 // Hook lParam is raw physical pixels; with mixed-DPI multi-monitor it
                 // diverges from desktop coordinates on the secondary screen. GetCursorPos
@@ -859,24 +931,37 @@ namespace ImeCursorDot
         void DetectShiftTap()
         {
             bool shift = Down(0x10);
-            // Any non-Shift key going down while Shift is held means the user is typing
-            // (Shift+punctuation, Shift+letter...), which Microsoft Pinyin does NOT count
-            // as a mode switch — cancel the tap.
-            for (int vk = 1; vk < 256; vk++)
-            {
-                bool d = vk == 0x10 ? shift : Down(vk);
-                if (d && !lastDown[vk] && vk != 0x10 && pollShiftDown)
-                    pollAlone = false;
-                lastDown[vk] = d;
-            }
 
+            // Handle the Shift down-edge BEFORE scanning other keys: when Shift and
+            // another key go down inside the same poll window, the old order let the
+            // other key's edge slip past the cancel check and toggle wrongly.
             if (shift && !pollShiftDown)
             {
                 pollShiftDown = true;
                 pollDownTick = Environment.TickCount;
-                pollAlone = !(Down(0x11) || Down(0x12) || Down(0x5B) || Down(0x5C));
+                // Modifiers already held BEFORE the Shift press don't cancel the tap
+                // (same semantics as v1.3; shift L/R excluded as they ARE the shift).
+                pollAlone = !(Down(0x11) || Down(0x12) || Down(0x5B) || Down(0x5C)
+                    || Down(0xA2) || Down(0xA3) || Down(0xA4) || Down(0xA5));
             }
-            else if (!shift && pollShiftDown)
+
+            // Any key going down while Shift is held means the user is typing
+            // (Shift+punctuation, Shift+letter...), which Microsoft Pinyin does NOT
+            // count as a mode switch — cancel the tap. Any key press also counts as
+            // user activity so the idle dance never starts while typing.
+            for (int vk = 1; vk < 256; vk++)
+            {
+                bool d = vk == 0x10 ? shift : Down(vk);
+                if (d && !lastDown[vk])
+                {
+                    lastActivityTick = Environment.TickCount;
+                    if (pollShiftDown && vk != 0x10 && vk != 0xA0 && vk != 0xA1)
+                        pollAlone = false;
+                }
+                lastDown[vk] = d;
+            }
+
+            if (!shift && pollShiftDown)
             {
                 pollShiftDown = false;
                 int dur = unchecked(Environment.TickCount - pollDownTick);
@@ -891,7 +976,7 @@ namespace ImeCursorDot
 
         void CursorMoved(int x, int y)
         {
-            idleTicks = 0;
+            lastActivityTick = Environment.TickCount;
             dancing = false;
             MoveDot(x, y);
         }
@@ -925,8 +1010,7 @@ namespace ImeCursorDot
             }
             else
             {
-                if (idleTicks < IDLE_TICKS) idleTicks++;
-                if (idleTicks >= IDLE_TICKS && Settings.Dance)
+                if (Settings.Dance && unchecked(Environment.TickCount - lastActivityTick) >= IDLE_MS)
                 {
                     dancing = true;
                     anchorX = targetX; anchorY = targetY;
@@ -950,8 +1034,16 @@ namespace ImeCursorDot
                 }
             }
 
-            // Watchdog: re-arm the mouse hook every ~10s in case Windows dropped it silently.
-            if (++tickCount % 400 == 0) InstallHooks();
+            // Watchdog: re-arm the mouse hook only when it has been silent past the
+            // grace period — unconditional periodic reinstalls themselves opened an
+            // event-loss window roughly every 13 seconds during active use.
+            tickCount++;
+            if (!pollShiftDown && unchecked(Environment.TickCount - lastMouseEvtTick) >= WATCHDOG_MS + 2000)
+            {
+                lastMouseEvtTick = Environment.TickCount;
+                InstallHooks();
+                Dbg("watchdog re-armed mouse hook");
+            }
         }
 
         protected override void Dispose(bool disposing)
@@ -961,11 +1053,34 @@ namespace ImeCursorDot
         }
     }
 
+    static class DebugLog
+    {
+        public static bool Enabled;
+        public static string File
+        {
+            get
+            {
+                return Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
+                    + "\\ImeCursorDot\\debug.log";
+            }
+        }
+    }
+
     static class Program
     {
         [STAThread]
         static void Main()
         {
+            foreach (string a in Environment.GetCommandLineArgs())
+                if (a == "--debug") DebugLog.Enabled = true;
+            Application.ThreadException += delegate(object src, System.Threading.ThreadExceptionEventArgs e)
+            {
+                if (AppContext.Current != null) AppContext.Current.OnThreadException(e.Exception);
+            };
+            AppDomain.CurrentDomain.UnhandledException += delegate(object src, UnhandledExceptionEventArgs e)
+            {
+                if (AppContext.Current != null) AppContext.Current.OnThreadException(e.ExceptionObject as Exception);
+            };
             bool createdNew;
             using (Mutex mtx = new Mutex(true, "ImeCursorDot_SingleInstance", out createdNew))
             {
