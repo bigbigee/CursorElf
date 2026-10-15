@@ -514,6 +514,159 @@ namespace ImeCursorDot
         }
     }
 
+    // Neumorphic ("软拟态") palette and shared painting helpers for the settings dialog:
+    // elements look extruded from / pressed into a single warm surface via paired
+    // light (top-left) and dark (bottom-right) shadows.
+    static class Neo
+    {
+        public static readonly Color Base  = Color.FromArgb(243, 236, 226); // 主表面（山竹果肉米色）
+        public static readonly Color Face  = Color.FromArgb(247, 241, 233); // 凸起元件面
+        public static readonly Color Well  = Color.FromArgb(230, 221, 208); // 凹陷元件面
+        public static readonly Color Dark  = Color.FromArgb(199, 184, 166); // 暗投影
+        public static readonly Color Light = Color.FromArgb(255, 251, 244); // 亮投影
+        public static readonly Color Rind  = Color.FromArgb(109, 47, 63);   // 山竹果皮深紫（强调色）
+        public static readonly Color Ink   = Color.FromArgb(74, 35, 51);    // 正文色
+
+        public static GraphicsPath RoundPath(Rectangle r, int radius)
+        {
+            GraphicsPath p = new GraphicsPath();
+            int d = radius * 2;
+            if (d > r.Width) d = r.Width;
+            if (d > r.Height) d = r.Height;
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
+        public static void FillRound(Graphics g, Rectangle r, int radius, Brush b)
+        {
+            using (GraphicsPath p = RoundPath(r, radius)) g.FillPath(b, p);
+        }
+
+        // Raised (extruded) rounded rect with soft dual shadows.
+        public static void Raised(Graphics g, Rectangle r, int radius, int depth)
+        {
+            for (int i = depth; i >= 1; i--)
+            {
+                int a = 96 - i * 22; if (a < 12) a = 12;
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(a, Dark)))
+                    FillRound(g, new Rectangle(r.X + i, r.Y + i, r.Width, r.Height), radius, b);
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(a / 2, Light)))
+                    FillRound(g, new Rectangle(r.X - i, r.Y - i, r.Width, r.Height), radius, b);
+            }
+            using (SolidBrush b = new SolidBrush(Face)) FillRound(g, r, radius, b);
+        }
+
+        // Pressed-in (well) rounded rect: inner dark edge top-left, light edge bottom-right.
+        public static void Inset(Graphics g, Rectangle r, int radius, Color face)
+        {
+            using (SolidBrush b = new SolidBrush(face)) FillRound(g, r, radius, b);
+            for (int i = 0; i < 3; i++)
+            {
+                using (Pen p = new Pen(Color.FromArgb(70 - i * 22, Dark)))
+                {
+                    Rectangle q = new Rectangle(r.X + i, r.Y + i, r.Width - 1, r.Height - 1);
+                    using (GraphicsPath pth = new GraphicsPath())
+                    {
+                        int d = radius * 2;
+                        pth.AddArc(q.X, q.Y, d, d, 90, 180);
+                        g.DrawPath(p, pth);
+                    }
+                }
+                using (Pen p = new Pen(Color.FromArgb(90 - i * 28, Light)))
+                {
+                    Rectangle q = new Rectangle(r.X + i, r.Y + i, r.Width - 1, r.Height - 1);
+                    using (GraphicsPath pth = new GraphicsPath())
+                    {
+                        int d = radius * 2;
+                        pth.AddArc(q.Right - d, q.Bottom - d, d, d, 270, 180);
+                        g.DrawPath(p, pth);
+                    }
+                }
+            }
+        }
+    }
+
+    class NeoButton : Button
+    {
+        bool pressed;
+        public bool Primary; // 强调按钮（确定）：文字深紫
+        public bool Swatch;  // 颜色样块：整个面即所选颜色
+
+        public NeoButton()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            FlatStyle = FlatStyle.Flat;
+            BackColor = Neo.Base;
+            Cursor = Cursors.Hand;
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e) { pressed = true; Invalidate(); base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { pressed = false; Invalidate(); base.OnMouseUp(e); }
+        protected override void OnMouseLeave(EventArgs e) { pressed = false; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Parent != null ? Parent.BackColor : Neo.Base);
+            Rectangle r = new Rectangle(3, 3, Width - 8, Height - 8);
+            Color textColor = Primary ? Neo.Rind : Neo.Ink;
+            if (Swatch)
+            {
+                Neo.Raised(g, r, 9, pressed ? 1 : 3);
+                Rectangle chip = new Rectangle(r.X + 4, r.Y + 4, r.Width - 8, r.Height - 8);
+                Neo.FillRound(g, chip, 6, new SolidBrush(BackColor));
+                using (Pen p = new Pen(Color.FromArgb(60, Neo.Ink)))
+                    using (GraphicsPath pth = Neo.RoundPath(chip, 6)) g.DrawPath(p, pth);
+            }
+            else if (pressed)
+            {
+                Neo.Inset(g, r, 9, Neo.Well);
+                textColor = Primary ? Neo.Rind : Color.FromArgb(150, Neo.Ink.R, Neo.Ink.G, Neo.Ink.B);
+                r.Y += 1;
+            }
+            else Neo.Raised(g, r, 9, 3);
+            TextRenderer.DrawText(g, Text, Font, r, textColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    class NeoSwitch : CheckBox
+    {
+        const int TrackW = 48, TrackH = 26;
+
+        public NeoSwitch()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            Size = new Size(TrackW + 6, TrackH + 6);
+            Cursor = Cursors.Hand;
+        }
+
+        protected override void OnCheckedChanged(EventArgs e) { base.OnCheckedChanged(e); Invalidate(); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Parent != null ? Parent.BackColor : Neo.Base);
+            int x = 3, y = (Height - TrackH) / 2;
+            Rectangle track = new Rectangle(x, y, TrackW, TrackH);
+            Neo.Inset(g, track, TrackH / 2, Checked ? Color.FromArgb(226, 205, 205) : Neo.Well);
+            int kd = TrackH - 8;
+            int kx = Checked ? x + TrackW - kd - 4 : x + 4;
+            Rectangle knob = new Rectangle(kx, y + 4, kd, kd);
+            Neo.Raised(g, knob, kd / 2, 2);
+            using (SolidBrush b = new SolidBrush(Checked ? Neo.Rind : Color.FromArgb(120, Neo.Dark)))
+                g.FillEllipse(b, knob.X + kd / 2 - 3, knob.Y + kd / 2 - 3, 6, 6);
+        }
+    }
+
     class SettingsForm : Form
     {
         Color pickZh, pickEn;
@@ -530,14 +683,16 @@ namespace ImeCursorDot
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(310, 498);
             Font = new Font("Microsoft YaHei", 9f);
+            BackColor = Neo.Base;
+            ForeColor = Neo.Ink;
 
             Label l1 = new Label(); l1.Text = "中文时颜色"; l1.Location = new Point(16, 16); l1.AutoSize = true;
-            Button btnZh = new Button(); btnZh.Location = new Point(140, 12); btnZh.Size = new Size(80, 26);
+            NeoButton btnZh = new NeoButton(); btnZh.Swatch = true; btnZh.Location = new Point(140, 12); btnZh.Size = new Size(80, 30);
             btnZh.BackColor = pickZh;
             btnZh.Click += delegate { Color c = Pick(pickZh); if (!c.IsEmpty) { pickZh = c; btnZh.BackColor = c; } };
 
             Label l2 = new Label(); l2.Text = "英文时颜色"; l2.Location = new Point(16, 50); l2.AutoSize = true;
-            Button btnEn = new Button(); btnEn.Location = new Point(140, 46); btnEn.Size = new Size(80, 26);
+            NeoButton btnEn = new NeoButton(); btnEn.Swatch = true; btnEn.Location = new Point(140, 46); btnEn.Size = new Size(80, 30);
             btnEn.BackColor = pickEn;
             btnEn.Click += delegate { Color c = Pick(pickEn); if (!c.IsEmpty) { pickEn = c; btnEn.BackColor = c; } };
 
@@ -545,6 +700,7 @@ namespace ImeCursorDot
             NumericUpDown numSize = new NumericUpDown();
             numSize.Location = new Point(140, 82); numSize.Width = 70;
             numSize.Minimum = 4; numSize.Maximum = 40; numSize.Value = pickSize;
+            StyleField(numSize);
 
             Label l4 = new Label(); l4.Text = "位置(相对光标)"; l4.Location = new Point(16, 120); l4.AutoSize = true;
             ComboBox cboPos = new ComboBox();
@@ -552,32 +708,38 @@ namespace ImeCursorDot
             cboPos.DropDownStyle = ComboBoxStyle.DropDownList;
             cboPos.Items.AddRange(new object[] { "右下", "左下", "右上", "左上" });
             cboPos.SelectedIndex = pickPos;
+            StyleCombo(cboPos);
 
             Label l5 = new Label(); l5.Text = "水平间距"; l5.Location = new Point(16, 154); l5.AutoSize = true;
             NumericUpDown numDx = new NumericUpDown();
             numDx.Location = new Point(140, 150); numDx.Width = 60;
             numDx.Minimum = 0; numDx.Maximum = 200; numDx.Value = Settings.Dx;
+            StyleField(numDx);
 
             Label l6 = new Label(); l6.Text = "垂直间距"; l6.Location = new Point(16, 186); l6.AutoSize = true;
             NumericUpDown numDy = new NumericUpDown();
             numDy.Location = new Point(140, 182); numDy.Width = 60;
             numDy.Minimum = 0; numDy.Maximum = 200; numDy.Value = Settings.Dy;
+            StyleField(numDy);
 
             Label l10 = new Label(); l10.Text = "跟随速度(慢1~快10)"; l10.Location = new Point(16, 220); l10.AutoSize = true;
             NumericUpDown numSpeed = new NumericUpDown();
             numSpeed.Location = new Point(140, 216); numSpeed.Width = 60;
             numSpeed.Minimum = 1; numSpeed.Maximum = 10; numSpeed.Value = Settings.Speed;
+            StyleField(numSpeed);
 
             Label l11 = new Label(); l11.Text = "不透明度(%)"; l11.Location = new Point(16, 254); l11.AutoSize = true;
             NumericUpDown numOpacity = new NumericUpDown();
             numOpacity.Location = new Point(140, 250); numOpacity.Width = 60;
             numOpacity.Minimum = 20; numOpacity.Maximum = 100; numOpacity.Value = Settings.Opacity;
+            StyleField(numOpacity);
 
-            CheckBox chkDance = new CheckBox(); chkDance.Text = "闲置 1 分钟时圆点跳舞"; chkDance.Location = new Point(140, 286); chkDance.AutoSize = true;
+            Label l12 = new Label(); l12.Text = "闲置跳舞"; l12.Location = new Point(16, 290); l12.AutoSize = true;
+            NeoSwitch chkDance = new NeoSwitch(); chkDance.Location = new Point(140, 284);
             chkDance.Checked = Settings.Dance;
 
             Label l7 = new Label(); l7.Text = "中文图案"; l7.Location = new Point(16, 322); l7.AutoSize = true;
-            Button btnImgZh = new Button(); btnImgZh.Location = new Point(140, 318); btnImgZh.Size = new Size(120, 26);
+            NeoButton btnImgZh = new NeoButton(); btnImgZh.Location = new Point(140, 316); btnImgZh.Size = new Size(120, 30);
             btnImgZh.Text = System.IO.File.Exists(Settings.ImagePath(true)) ? "已选择(点击更换)" : "选择图片…";
             string pendingZh = null, pendingEn = null;
             bool pendingClear = false;
@@ -588,7 +750,7 @@ namespace ImeCursorDot
             };
 
             Label l8 = new Label(); l8.Text = "英文图案"; l8.Location = new Point(16, 356); l8.AutoSize = true;
-            Button btnImgEn = new Button(); btnImgEn.Location = new Point(140, 352); btnImgEn.Size = new Size(120, 26);
+            NeoButton btnImgEn = new NeoButton(); btnImgEn.Location = new Point(140, 350); btnImgEn.Size = new Size(120, 30);
             btnImgEn.Text = System.IO.File.Exists(Settings.ImagePath(false)) ? "已选择(点击更换)" : "选择图片…";
             btnImgEn.Click += delegate
             {
@@ -598,12 +760,14 @@ namespace ImeCursorDot
 
             Label l9 = new Label(); l9.Text = "图案裁剪形状"; l9.Location = new Point(16, 392); l9.AutoSize = true;
             ComboBox cboCrop = new ComboBox();
-            cboCrop.Location = new Point(140, 388); cboCrop.Width = 80;
+            cboCrop.Location = new Point(140, 388); cboCrop.Width = 74;
             cboCrop.DropDownStyle = ComboBoxStyle.DropDownList;
             cboCrop.Items.AddRange(new object[] { "圆形", "正方形" });
             cboCrop.SelectedIndex = Settings.Crop;
+            StyleCombo(cboCrop);
 
-            Button btnDef = new Button(); btnDef.Text = "恢复默认圆点"; btnDef.Location = new Point(230, 386); btnDef.Size = new Size(72, 30);
+            NeoButton btnDef = new NeoButton(); btnDef.Text = "恢复默认圆点"; btnDef.Location = new Point(218, 384); btnDef.Size = new Size(88, 34);
+            btnDef.Font = new Font("Microsoft YaHei", 8f);
             btnDef.Click += delegate
             {
                 // Deletion is deferred to 确定 (and then goes to the recycle bin),
@@ -615,13 +779,14 @@ namespace ImeCursorDot
             LinkLabel lnk = new LinkLabel();
             lnk.Text = "项目主页与更新下载（GitHub）";
             lnk.Location = new Point(16, 428); lnk.AutoSize = true;
+            lnk.LinkColor = Neo.Rind; lnk.ActiveLinkColor = Color.FromArgb(150, 70, 90);
             lnk.LinkClicked += delegate
             {
                 try { System.Diagnostics.Process.Start("https://github.com/bigbigee/CursorElf"); }
                 catch { }
             };
 
-            Button ok = new Button(); ok.Text = "确定"; ok.Location = new Point(60, 460); ok.Size = new Size(80, 28);
+            NeoButton ok = new NeoButton(); ok.Primary = true; ok.Text = "确定"; ok.Location = new Point(60, 458); ok.Size = new Size(80, 32);
             ok.Click += delegate
             {
                 bool imgFail = false;
@@ -644,7 +809,7 @@ namespace ImeCursorDot
                 DialogResult = DialogResult.OK;
                 Close();
             };
-            Button cancel = new Button(); cancel.Text = "取消"; cancel.Location = new Point(180, 460); cancel.Size = new Size(80, 28);
+            NeoButton cancel = new NeoButton(); cancel.Text = "取消"; cancel.Location = new Point(180, 458); cancel.Size = new Size(80, 32);
             cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
 
             Controls.Add(l1); Controls.Add(btnZh);
@@ -655,13 +820,23 @@ namespace ImeCursorDot
             Controls.Add(l6); Controls.Add(numDy);
             Controls.Add(l10); Controls.Add(numSpeed);
             Controls.Add(l11); Controls.Add(numOpacity);
-            Controls.Add(chkDance);
+            Controls.Add(l12); Controls.Add(chkDance);
             Controls.Add(l7); Controls.Add(btnImgZh);
             Controls.Add(l8); Controls.Add(btnImgEn);
             Controls.Add(l9); Controls.Add(cboCrop); Controls.Add(btnDef);
             Controls.Add(lnk);
             Controls.Add(ok); Controls.Add(cancel);
             AcceptButton = ok; CancelButton = cancel;
+        }
+
+        static void StyleField(NumericUpDown n)
+        {
+            n.BackColor = Neo.Face; n.ForeColor = Neo.Ink; n.BorderStyle = BorderStyle.None;
+        }
+
+        static void StyleCombo(ComboBox c)
+        {
+            c.FlatStyle = FlatStyle.Flat; c.BackColor = Neo.Face; c.ForeColor = Neo.Ink;
         }
 
         static Color Pick(Color current)
