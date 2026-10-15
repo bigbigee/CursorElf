@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Drawing.Drawing2D;
@@ -471,61 +472,27 @@ namespace ImeCursorDot
         }
     }
 
-    class MangosteenRenderer : ToolStripProfessionalRenderer
+    // Card-style ("简约卡片") design tokens shared by the settings dialog and tray menu.
+    static class Pal
     {
-        static readonly Color Rind = Color.FromArgb(109, 47, 63);    // 山竹果皮深紫
-        static readonly Color Flesh = Color.FromArgb(250, 243, 231); // 果肉米白
-        static readonly Color Blush = Color.FromArgb(240, 223, 212); // 选中淡粉
-        static readonly Color Ink = Color.FromArgb(74, 35, 51);
-
-        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
-        {
-            using (SolidBrush b = new SolidBrush(Flesh)) e.Graphics.FillRectangle(b, e.AffectedBounds);
-        }
-
-        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
-        {
-            using (Pen p = new Pen(Rind)) e.Graphics.DrawRectangle(p, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
-        }
-
-        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
-        {
-            if (!e.Item.Selected) return;
-            Rectangle r = new Rectangle(1, 0, e.Item.Width - 2, e.Item.Height - 1);
-            using (SolidBrush b = new SolidBrush(Blush)) e.Graphics.FillRectangle(b, r);
-            using (SolidBrush b = new SolidBrush(Rind)) e.Graphics.FillRectangle(b, new Rectangle(2, r.Top + 3, 3, r.Height - 6));
-        }
-
-        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
-        {
-            e.TextColor = e.Item.Selected ? Rind : (e.Item.Enabled ? Ink : Color.Gray);
-            base.OnRenderItemText(e);
-        }
-
-        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
-        {
-            int y = e.Item.Height / 2;
-            using (Pen p = new Pen(Color.FromArgb(130, Rind))) e.Graphics.DrawLine(p, 10, y, e.Item.Width - 10, y);
-        }
-
-        protected override void OnRenderImageMargin(ToolStripRenderEventArgs e)
-        {
-            using (SolidBrush b = new SolidBrush(Flesh)) e.Graphics.FillRectangle(b, e.AffectedBounds);
-        }
-    }
-
-    // Neumorphic ("软拟态") palette and shared painting helpers for the settings dialog:
-    // elements look extruded from / pressed into a single warm surface via paired
-    // light (top-left) and dark (bottom-right) shadows.
-    static class Neo
-    {
-        public static readonly Color Base  = Color.FromArgb(243, 236, 226); // 主表面（山竹果肉米色）
-        public static readonly Color Face  = Color.FromArgb(247, 241, 233); // 凸起元件面
-        public static readonly Color Well  = Color.FromArgb(230, 221, 208); // 凹陷元件面
-        public static readonly Color Dark  = Color.FromArgb(199, 184, 166); // 暗投影
-        public static readonly Color Light = Color.FromArgb(255, 251, 244); // 亮投影
-        public static readonly Color Rind  = Color.FromArgb(109, 47, 63);   // 山竹果皮深紫（强调色）
-        public static readonly Color Ink   = Color.FromArgb(74, 35, 51);    // 正文色
+        public static readonly Color Bg = Color.FromArgb(251, 250, 245);        // 米白底
+        public static readonly Color Card = Color.FromArgb(255, 255, 255);      // 卡片白
+        public static readonly Color Border = Color.FromArgb(234, 230, 218);    // 外框
+        public static readonly Color Divider = Color.FromArgb(240, 237, 227);   // 分隔线
+        public static readonly Color InputBrd = Color.FromArgb(229, 225, 213);  // 控件描边
+        public static readonly Color Text = Color.FromArgb(61, 74, 67);         // 主文字
+        public static readonly Color TextSub = Color.FromArgb(92, 107, 98);     // 次级文字
+        public static readonly Color Title = Color.FromArgb(154, 164, 155);     // 分组标题
+        public static readonly Color Green = Color.FromArgb(110, 150, 121);     // 主色浅绿
+        public static readonly Color GreenHover = Color.FromArgb(95, 134, 105);
+        public static readonly Color Red = Color.FromArgb(217, 140, 124);       // 低饱和红
+        public static readonly Color Hover = Color.FromArgb(243, 247, 243);     // 悬停态
+        public static readonly Color BtnSoft = Color.FromArgb(237, 242, 236);   // 次级按钮底
+        public static readonly Color BtnSoftText = Color.FromArgb(79, 122, 94);
+        public static readonly Color BtnSoftHover = Color.FromArgb(226, 235, 227);
+        public static readonly Color Groove = Color.FromArgb(239, 236, 226);    // 滑条底槽
+        public static readonly Color Sub = Color.FromArgb(143, 180, 155);       // 滑条已填充
+        public static readonly Color ToggleOff = Color.FromArgb(216, 212, 200);
 
         public static GraphicsPath RoundPath(Rectangle r, int radius)
         {
@@ -541,110 +508,173 @@ namespace ImeCursorDot
             return p;
         }
 
-        public static void FillRound(Graphics g, Rectangle r, int radius, Brush b)
+        public static void FillRound(Graphics g, Rectangle r, int radius, Color c)
         {
-            using (GraphicsPath p = RoundPath(r, radius)) g.FillPath(b, p);
+            using (SolidBrush b = new SolidBrush(c))
+                using (GraphicsPath p = RoundPath(r, radius)) g.FillPath(b, p);
         }
 
-        // Raised (extruded) rounded rect with soft dual shadows.
-        public static void Raised(Graphics g, Rectangle r, int radius, int depth)
+        public static void DrawRound(Graphics g, Rectangle r, int radius, Color c, float width)
         {
-            for (int i = depth; i >= 1; i--)
-            {
-                int a = 96 - i * 22; if (a < 12) a = 12;
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(a, Dark)))
-                    FillRound(g, new Rectangle(r.X + i, r.Y + i, r.Width, r.Height), radius, b);
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(a / 2, Light)))
-                    FillRound(g, new Rectangle(r.X - i, r.Y - i, r.Width, r.Height), radius, b);
-            }
-            using (SolidBrush b = new SolidBrush(Face)) FillRound(g, r, radius, b);
-        }
-
-        // Pressed-in (well) rounded rect: inner dark edge top-left, light edge bottom-right.
-        public static void Inset(Graphics g, Rectangle r, int radius, Color face)
-        {
-            using (SolidBrush b = new SolidBrush(face)) FillRound(g, r, radius, b);
-            for (int i = 0; i < 3; i++)
-            {
-                using (Pen p = new Pen(Color.FromArgb(70 - i * 22, Dark)))
-                {
-                    Rectangle q = new Rectangle(r.X + i, r.Y + i, r.Width - 1, r.Height - 1);
-                    using (GraphicsPath pth = new GraphicsPath())
-                    {
-                        int d = radius * 2;
-                        pth.AddArc(q.X, q.Y, d, d, 90, 180);
-                        g.DrawPath(p, pth);
-                    }
-                }
-                using (Pen p = new Pen(Color.FromArgb(90 - i * 28, Light)))
-                {
-                    Rectangle q = new Rectangle(r.X + i, r.Y + i, r.Width - 1, r.Height - 1);
-                    using (GraphicsPath pth = new GraphicsPath())
-                    {
-                        int d = radius * 2;
-                        pth.AddArc(q.Right - d, q.Bottom - d, d, d, 270, 180);
-                        g.DrawPath(p, pth);
-                    }
-                }
-            }
+            using (Pen p = new Pen(c, width))
+                using (GraphicsPath pth = RoundPath(r, radius)) g.DrawPath(p, pth);
         }
     }
 
-    class NeoButton : Button
+    static class MenuIcons
     {
-        bool pressed;
-        public bool Primary; // 强调按钮（确定）：文字深紫
-        public bool Swatch;  // 颜色样块：整个面即所选颜色
+        public static Bitmap Dot(Color c)
+        {
+            Bitmap bmp = new Bitmap(16, 16);
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (SolidBrush b = new SolidBrush(c)) g.FillEllipse(b, 4, 4, 8, 8);
+            }
+            return bmp;
+        }
 
-        public NeoButton()
+        public static Bitmap Check(bool on)
+        {
+            Bitmap bmp = new Bitmap(16, 16);
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                Rectangle r = new Rectangle(1, 1, 13, 13);
+                if (on)
+                {
+                    Pal.FillRound(g, r, 4, Pal.Green);
+                    using (Pen p = new Pen(Color.White, 1.8f))
+                        g.DrawLines(p, new Point[] { new Point(4, 8), new Point(7, 11), new Point(12, 5) });
+                }
+                else Pal.DrawRound(g, r, 4, Pal.InputBrd, 1f);
+            }
+            return bmp;
+        }
+
+        public static Bitmap Glyph(string ch)
+        {
+            Bitmap bmp = new Bitmap(16, 16);
+            using (Graphics g = Graphics.FromImage(bmp))
+                TextRenderer.DrawText(g, ch, new Font("Segoe MDL2 Assets", 9f), new Rectangle(0, 0, 16, 16),
+                    Pal.TextSub, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            return bmp;
+        }
+    }
+
+    class CardMenuRenderer : ToolStripProfessionalRenderer
+    {
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+        {
+            using (SolidBrush b = new SolidBrush(Pal.Card)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+        }
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            Pal.DrawRound(e.Graphics, new Rectangle(0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1), 10, Pal.Border, 1f);
+        }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.Selected || !e.Item.Enabled) return;
+            Pal.FillRound(e.Graphics, new Rectangle(2, 1, e.Item.Width - 4, e.Item.Height - 2), 8, Pal.Hover);
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            e.TextColor = !e.Item.Enabled ? Pal.Title : (e.Item.Selected ? Pal.Text : Pal.TextSub);
+            base.OnRenderItemText(e);
+        }
+
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            int y = e.Item.Height / 2;
+            using (Pen p = new Pen(Pal.Divider)) e.Graphics.DrawLine(p, 8, y, e.Item.Width - 8, y);
+        }
+
+        protected override void OnRenderImageMargin(ToolStripRenderEventArgs e)
+        {
+            using (SolidBrush b = new SolidBrush(Pal.Card)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+        }
+    }
+
+    enum BtnKind { Primary, Ghost, Soft }
+
+    class FlatBtn : Button
+    {
+        public BtnKind Kind = BtnKind.Ghost;
+        bool hover, pressed;
+
+        public FlatBtn()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             FlatStyle = FlatStyle.Flat;
-            BackColor = Neo.Base;
+            BackColor = Pal.Card;
+            ForeColor = Pal.Text;
             Cursor = Cursors.Hand;
         }
 
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; pressed = false; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnMouseDown(MouseEventArgs e) { pressed = true; Invalidate(); base.OnMouseDown(e); }
         protected override void OnMouseUp(MouseEventArgs e) { pressed = false; Invalidate(); base.OnMouseUp(e); }
-        protected override void OnMouseLeave(EventArgs e) { pressed = false; Invalidate(); base.OnMouseLeave(e); }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Parent != null ? Parent.BackColor : Neo.Base);
-            Rectangle r = new Rectangle(3, 3, Width - 8, Height - 8);
-            Color textColor = Primary ? Neo.Rind : Neo.Ink;
-            if (Swatch)
-            {
-                Neo.Raised(g, r, 9, pressed ? 1 : 3);
-                Rectangle chip = new Rectangle(r.X + 4, r.Y + 4, r.Width - 8, r.Height - 8);
-                Neo.FillRound(g, chip, 6, new SolidBrush(BackColor));
-                using (Pen p = new Pen(Color.FromArgb(60, Neo.Ink)))
-                    using (GraphicsPath pth = Neo.RoundPath(chip, 6)) g.DrawPath(p, pth);
-            }
-            else if (pressed)
-            {
-                Neo.Inset(g, r, 9, Neo.Well);
-                textColor = Primary ? Neo.Rind : Color.FromArgb(150, Neo.Ink.R, Neo.Ink.G, Neo.Ink.B);
-                r.Y += 1;
-            }
-            else Neo.Raised(g, r, 9, 3);
-            TextRenderer.DrawText(g, Text, Font, r, textColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            g.Clear(Parent != null ? Parent.BackColor : Pal.Bg);
+            Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
+            Color bg, text;
+            bool border = false;
+            if (Kind == BtnKind.Primary) { bg = hover ? Pal.GreenHover : Pal.Green; text = Color.White; }
+            else if (Kind == BtnKind.Soft) { bg = hover ? Pal.BtnSoftHover : Pal.BtnSoft; text = Pal.BtnSoftText; }
+            else { bg = hover ? Pal.Hover : Pal.Card; text = Pal.TextSub; border = true; }
+            if (pressed) text = Color.FromArgb(180, text.R, text.G, text.B);
+            Pal.FillRound(g, r, 8, bg);
+            if (border) Pal.DrawRound(g, r, 8, Pal.InputBrd, 1f);
+            TextRenderer.DrawText(g, Text, Font, r, text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        }
+    }
+
+    class SwatchBtn : Button
+    {
+        bool hover;
+
+        public SwatchBtn()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            FlatStyle = FlatStyle.Flat;
+            Cursor = Cursors.Hand;
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Parent != null ? Parent.BackColor : Pal.Bg);
+            Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
+            Pal.FillRound(g, r, Height / 2, BackColor);
+            Pal.DrawRound(g, r, Height / 2, hover ? Pal.TextSub : Pal.InputBrd, 1f);
         }
     }
 
     class NeoSwitch : CheckBox
     {
-        const int TrackW = 48, TrackH = 26;
+        const int TrackW = 40, TrackH = 22;
 
         public NeoSwitch()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            Size = new Size(TrackW + 6, TrackH + 6);
+            Size = new Size(TrackW + 4, TrackH + 6);
             Cursor = Cursors.Hand;
         }
 
@@ -654,120 +684,283 @@ namespace ImeCursorDot
         {
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Parent != null ? Parent.BackColor : Neo.Base);
-            int x = 3, y = (Height - TrackH) / 2;
-            Rectangle track = new Rectangle(x, y, TrackW, TrackH);
-            Neo.Inset(g, track, TrackH / 2, Checked ? Color.FromArgb(226, 205, 205) : Neo.Well);
-            int kd = TrackH - 8;
-            int kx = Checked ? x + TrackW - kd - 4 : x + 4;
-            Rectangle knob = new Rectangle(kx, y + 4, kd, kd);
-            Neo.Raised(g, knob, kd / 2, 2);
-            using (SolidBrush b = new SolidBrush(Checked ? Neo.Rind : Color.FromArgb(120, Neo.Dark)))
-                g.FillEllipse(b, knob.X + kd / 2 - 3, knob.Y + kd / 2 - 3, 6, 6);
+            g.Clear(Parent != null ? Parent.BackColor : Pal.Bg);
+            Rectangle track = new Rectangle(2, (Height - TrackH) / 2, TrackW, TrackH);
+            Pal.FillRound(g, track, TrackH / 2, Checked ? Pal.Green : Pal.ToggleOff);
+            const int kd = 18;
+            int kx = Checked ? track.Right - kd - 2 : track.X + 2;
+            Rectangle knob = new Rectangle(kx, track.Y + (TrackH - kd) / 2, kd, kd);
+            using (SolidBrush b = new SolidBrush(Color.FromArgb(40, 0, 0, 0)))
+                g.FillEllipse(b, knob.X + 1, knob.Y + 2, kd, kd);
+            using (SolidBrush b = new SolidBrush(Color.White)) g.FillEllipse(b, knob);
+        }
+    }
+
+    class NeoSlider : Control
+    {
+        int min = 1, max = 10, val = 10;
+        bool dragging;
+
+        public event EventHandler ValueChanged;
+
+        public NeoSlider()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            Size = new Size(150, 28);
+            Cursor = Cursors.Hand;
+        }
+
+        public int Minimum { get { return min; } set { min = value; Clamp(); Invalidate(); } }
+        public int Maximum { get { return max; } set { max = value; Clamp(); Invalidate(); } }
+
+        public int Value
+        {
+            get { return val; }
+            set
+            {
+                int v = value;
+                if (v < min) v = min;
+                if (v > max) v = max;
+                if (v == val) return;
+                val = v;
+                Invalidate();
+                if (ValueChanged != null) ValueChanged(this, EventArgs.Empty);
+            }
+        }
+
+        void Clamp()
+        {
+            if (val < min) val = min;
+            if (val > max) val = max;
+        }
+
+        int Travel { get { return (int)Math.Round((double)(val - min) / (max - min) * (Width - 18)); } }
+
+        void SetFromX(int x)
+        {
+            double frac = (x - 9) / (double)(Width - 18);
+            if (frac < 0) frac = 0;
+            if (frac > 1) frac = 1;
+            Value = min + (int)Math.Round(frac * (max - min));
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            dragging = true; Capture = true; SetFromX(e.X); base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            if (dragging) SetFromX(e.X);
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            dragging = false; Capture = false; base.OnMouseUp(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Parent != null ? Parent.BackColor : Pal.Bg);
+            Rectangle groove = new Rectangle(0, (Height - 16) / 2, Width, 16);
+            using (GraphicsPath p = Pal.RoundPath(groove, 8))
+            {
+                using (SolidBrush b = new SolidBrush(Pal.Groove)) g.FillPath(b, p);
+                g.SetClip(new Rectangle(0, 0, 9 + Travel, Height));
+                using (SolidBrush b = new SolidBrush(Pal.Sub)) g.FillPath(b, p);
+                g.ResetClip();
+            }
+            int kx = Travel;
+            Rectangle knob = new Rectangle(kx, (Height - 18) / 2, 18, 18);
+            using (SolidBrush b = new SolidBrush(Color.White)) g.FillEllipse(b, knob);
+            using (Pen p = new Pen(Pal.Green, 2f)) g.DrawEllipse(p, knob);
+        }
+    }
+
+    class FlatCombo : ComboBox
+    {
+        public FlatCombo()
+        {
+            FlatStyle = FlatStyle.Flat;
+            DrawMode = DrawMode.OwnerDrawFixed;
+            DropDownStyle = ComboBoxStyle.DropDownList;
+            BackColor = Pal.Card;
+            ForeColor = Pal.Text;
+        }
+
+        protected override void OnDrawItem(DrawItemEventArgs e)
+        {
+            base.OnDrawItem(e);
+            if (e.Index < 0) return;
+            bool sel = (e.State & DrawItemState.Selected) != 0;
+            using (SolidBrush b = new SolidBrush(sel ? Pal.Hover : Pal.Card)) e.Graphics.FillRectangle(b, e.Bounds);
+            TextRenderer.DrawText(e.Graphics, GetItemText(Items[e.Index]), Font, e.Bounds, Pal.Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg == 0xF && IsHandleCreated) // WM_PAINT: repaint the system drop button as flat white + chevron
+            {
+                using (Graphics g = Graphics.FromHwnd(Handle))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    using (SolidBrush b = new SolidBrush(Pal.Card)) g.FillRectangle(b, Width - 20, 1, 19, Height - 2);
+                    using (Pen p = new Pen(Pal.TextSub, 1.4f))
+                    {
+                        int cx = Width - 11, cy = Height / 2;
+                        g.DrawLines(p, new Point[] { new Point(cx - 4, cy - 2), new Point(cx, cy + 3), new Point(cx + 4, cy - 2) });
+                    }
+                }
+            }
         }
     }
 
     class SettingsForm : Form
     {
         Color pickZh, pickEn;
-        int pickSize, pickPos;
+        readonly List<Rectangle> fieldBorders = new List<Rectangle>();
+
+        const int FW = 420, FH = 792, MX = 24, CW = 372, PAD = 16, RX = FW - MX - PAD; // RX: control right edge
+        const int Card1Y = 52, Card1H = 170;
+        const int Card2Y = 236, Card2H = 252;
+        const int Card3Y = 502, Card3H = 210;
+        const int DivY = 726;
+
+        [DllImport("user32.dll")] static extern bool ReleaseCapture();
+        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
 
         public SettingsForm()
         {
             pickZh = Settings.Zh; pickEn = Settings.En;
-            pickSize = Settings.Size; pickPos = Settings.Pos;
 
             Text = "圆点设置";
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            FormBorderStyle = FormBorderStyle.None;
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(310, 498);
-            Font = new Font("Microsoft YaHei", 9f);
-            BackColor = Neo.Base;
-            ForeColor = Neo.Ink;
+            ClientSize = new Size(FW, FH);
+            Font = new Font("Microsoft YaHei UI", 9f);
+            BackColor = Pal.Bg;
+            ForeColor = Pal.Text;
+            DoubleBuffered = true;
+            Region = new Region(Pal.RoundPath(new Rectangle(0, 0, FW, FH), 14));
+            MouseDown += OnDragBar;
 
-            Label l1 = new Label(); l1.Text = "中文时颜色"; l1.Location = new Point(16, 16); l1.AutoSize = true;
-            NeoButton btnZh = new NeoButton(); btnZh.Swatch = true; btnZh.Location = new Point(140, 12); btnZh.Size = new Size(80, 30);
-            btnZh.BackColor = pickZh;
+            Label title = new Label();
+            title.Text = "圆点设置"; title.AutoSize = true;
+            title.Location = new Point(MX, 14);
+            title.Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold);
+            title.ForeColor = Pal.Text; title.BackColor = Color.Transparent;
+            title.MouseDown += OnDragBar;
+
+            FlatBtn close = new FlatBtn(); close.Kind = BtnKind.Ghost;
+            close.Text = "✕"; close.Location = new Point(FW - 48, 12); close.Size = new Size(28, 28);
+            close.Font = new Font("Microsoft YaHei UI", 9f);
+            close.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
+
+            // ---- 卡片一：颜色与大小 ----
+            Label g1 = GroupTitle("颜色与大小", Card1Y + 12);
+            int y = Card1Y + 38;
+
+            Label l1 = RowLabel("中文时颜色", MX + PAD, y + 7);
+            SwatchBtn btnZh = new SwatchBtn(); btnZh.BackColor = pickZh;
+            btnZh.Location = new Point(RX - 56, y + 4); btnZh.Size = new Size(56, 24);
             btnZh.Click += delegate { Color c = Pick(pickZh); if (!c.IsEmpty) { pickZh = c; btnZh.BackColor = c; } };
 
-            Label l2 = new Label(); l2.Text = "英文时颜色"; l2.Location = new Point(16, 50); l2.AutoSize = true;
-            NeoButton btnEn = new NeoButton(); btnEn.Swatch = true; btnEn.Location = new Point(140, 46); btnEn.Size = new Size(80, 30);
-            btnEn.BackColor = pickEn;
+            Label l2 = RowLabel("英文时颜色", MX + PAD, y + 49);
+            SwatchBtn btnEn = new SwatchBtn(); btnEn.BackColor = pickEn;
+            btnEn.Location = new Point(RX - 56, y + 46); btnEn.Size = new Size(56, 24);
             btnEn.Click += delegate { Color c = Pick(pickEn); if (!c.IsEmpty) { pickEn = c; btnEn.BackColor = c; } };
 
-            Label l3 = new Label(); l3.Text = "大小(像素)"; l3.Location = new Point(16, 86); l3.AutoSize = true;
+            Label l3 = RowLabel("大小（像素）", MX + PAD, y + 91);
             NumericUpDown numSize = new NumericUpDown();
-            numSize.Location = new Point(140, 82); numSize.Width = 70;
-            numSize.Minimum = 4; numSize.Maximum = 40; numSize.Value = pickSize;
-            StyleField(numSize);
+            numSize.Minimum = 4; numSize.Maximum = 40; numSize.Value = Settings.Size;
+            numSize.Location = new Point(RX - 80, y + 90); numSize.Width = 80;
+            StyleField(numSize); AddBorder(numSize);
 
-            Label l4 = new Label(); l4.Text = "位置(相对光标)"; l4.Location = new Point(16, 120); l4.AutoSize = true;
-            ComboBox cboPos = new ComboBox();
-            cboPos.Location = new Point(140, 116); cboPos.Width = 110;
-            cboPos.DropDownStyle = ComboBoxStyle.DropDownList;
+            // ---- 卡片二：位置与运动 ----
+            Label g2 = GroupTitle("位置与运动", Card2Y + 12);
+            y = Card2Y + 38;
+
+            Label l4 = RowLabel("位置（相对光标）", MX + PAD, y + 7);
+            FlatCombo cboPos = new FlatCombo();
             cboPos.Items.AddRange(new object[] { "右下", "左下", "右上", "左上" });
-            cboPos.SelectedIndex = pickPos;
-            StyleCombo(cboPos);
+            cboPos.SelectedIndex = Settings.Pos;
+            cboPos.Location = new Point(RX - 110, y + 4); cboPos.Width = 110;
+            AddBorder(cboPos);
 
-            Label l5 = new Label(); l5.Text = "水平间距"; l5.Location = new Point(16, 154); l5.AutoSize = true;
+            Label l5 = RowLabel("水平间距", MX + PAD, y + 49);
             NumericUpDown numDx = new NumericUpDown();
-            numDx.Location = new Point(140, 150); numDx.Width = 60;
             numDx.Minimum = 0; numDx.Maximum = 200; numDx.Value = Settings.Dx;
-            StyleField(numDx);
+            numDx.Location = new Point(RX - 80, y + 48); numDx.Width = 80;
+            StyleField(numDx); AddBorder(numDx);
 
-            Label l6 = new Label(); l6.Text = "垂直间距"; l6.Location = new Point(16, 186); l6.AutoSize = true;
+            Label l6 = RowLabel("垂直间距", MX + PAD, y + 91);
             NumericUpDown numDy = new NumericUpDown();
-            numDy.Location = new Point(140, 182); numDy.Width = 60;
             numDy.Minimum = 0; numDy.Maximum = 200; numDy.Value = Settings.Dy;
-            StyleField(numDy);
+            numDy.Location = new Point(RX - 80, y + 90); numDy.Width = 80;
+            StyleField(numDy); AddBorder(numDy);
 
-            Label l10 = new Label(); l10.Text = "跟随速度(慢1~快10)"; l10.Location = new Point(16, 220); l10.AutoSize = true;
-            NumericUpDown numSpeed = new NumericUpDown();
-            numSpeed.Location = new Point(140, 216); numSpeed.Width = 60;
-            numSpeed.Minimum = 1; numSpeed.Maximum = 10; numSpeed.Value = Settings.Speed;
-            StyleField(numSpeed);
+            Label l10 = RowLabel("跟随速度（慢1~快10）", MX + PAD, y + 133);
+            Label valSpeed = new Label(); valSpeed.AutoSize = true;
+            valSpeed.Text = Settings.Speed.ToString(); valSpeed.ForeColor = Pal.Text;
+            valSpeed.BackColor = Color.Transparent; valSpeed.Location = new Point(RX - 22, y + 136);
+            NeoSlider sldSpeed = new NeoSlider();
+            sldSpeed.Minimum = 1; sldSpeed.Maximum = 10; sldSpeed.Value = Settings.Speed;
+            sldSpeed.Location = new Point(RX - 32 - 150, y + 130);
+            sldSpeed.ValueChanged += delegate { valSpeed.Text = sldSpeed.Value.ToString(); };
 
-            Label l11 = new Label(); l11.Text = "不透明度(%)"; l11.Location = new Point(16, 254); l11.AutoSize = true;
-            NumericUpDown numOpacity = new NumericUpDown();
-            numOpacity.Location = new Point(140, 250); numOpacity.Width = 60;
-            numOpacity.Minimum = 20; numOpacity.Maximum = 100; numOpacity.Value = Settings.Opacity;
-            StyleField(numOpacity);
+            Label l11 = RowLabel("不透明度（%）", MX + PAD, y + 175);
+            Label valOpacity = new Label(); valOpacity.AutoSize = true;
+            valOpacity.Text = Settings.Opacity.ToString(); valOpacity.ForeColor = Pal.Text;
+            valOpacity.BackColor = Color.Transparent; valOpacity.Location = new Point(RX - 22, y + 178);
+            NeoSlider sldOpacity = new NeoSlider();
+            sldOpacity.Minimum = 20; sldOpacity.Maximum = 100; sldOpacity.Value = Settings.Opacity;
+            sldOpacity.Location = new Point(RX - 32 - 150, y + 172);
+            sldOpacity.ValueChanged += delegate { valOpacity.Text = sldOpacity.Value.ToString(); };
 
-            Label l12 = new Label(); l12.Text = "闲置跳舞"; l12.Location = new Point(16, 290); l12.AutoSize = true;
-            NeoSwitch chkDance = new NeoSwitch(); chkDance.Location = new Point(140, 284);
+            // ---- 卡片三：图案设置 ----
+            Label g3 = GroupTitle("图案设置", Card3Y + 12);
+            y = Card3Y + 38;
+
+            Label l12 = RowLabel("闲置跳舞", MX + PAD, y + 7);
+            NeoSwitch chkDance = new NeoSwitch();
             chkDance.Checked = Settings.Dance;
+            chkDance.Location = new Point(RX - 44, y + 4);
 
-            Label l7 = new Label(); l7.Text = "中文图案"; l7.Location = new Point(16, 322); l7.AutoSize = true;
-            NeoButton btnImgZh = new NeoButton(); btnImgZh.Location = new Point(140, 316); btnImgZh.Size = new Size(120, 30);
-            btnImgZh.Text = System.IO.File.Exists(Settings.ImagePath(true)) ? "已选择(点击更换)" : "选择图片…";
+            Label l7 = RowLabel("中文图案", MX + PAD, y + 49);
             string pendingZh = null, pendingEn = null;
             bool pendingClear = false;
+            FlatBtn btnImgZh = new FlatBtn(); btnImgZh.Kind = BtnKind.Soft;
+            btnImgZh.Text = System.IO.File.Exists(Settings.ImagePath(true)) ? "已选择(点击更换)" : "选择图片…";
+            btnImgZh.Location = new Point(RX - 104, y + 45); btnImgZh.Size = new Size(104, 30);
             btnImgZh.Click += delegate
             {
                 string f = PickFile();
                 if (f != null) { pendingZh = f; btnImgZh.Text = "已选择(点击更换)"; }
             };
 
-            Label l8 = new Label(); l8.Text = "英文图案"; l8.Location = new Point(16, 356); l8.AutoSize = true;
-            NeoButton btnImgEn = new NeoButton(); btnImgEn.Location = new Point(140, 350); btnImgEn.Size = new Size(120, 30);
+            Label l8 = RowLabel("英文图案", MX + PAD, y + 91);
+            FlatBtn btnImgEn = new FlatBtn(); btnImgEn.Kind = BtnKind.Soft;
             btnImgEn.Text = System.IO.File.Exists(Settings.ImagePath(false)) ? "已选择(点击更换)" : "选择图片…";
+            btnImgEn.Location = new Point(RX - 104, y + 87); btnImgEn.Size = new Size(104, 30);
             btnImgEn.Click += delegate
             {
                 string f = PickFile();
                 if (f != null) { pendingEn = f; btnImgEn.Text = "已选择(点击更换)"; }
             };
 
-            Label l9 = new Label(); l9.Text = "图案裁剪形状"; l9.Location = new Point(16, 392); l9.AutoSize = true;
-            ComboBox cboCrop = new ComboBox();
-            cboCrop.Location = new Point(140, 388); cboCrop.Width = 74;
-            cboCrop.DropDownStyle = ComboBoxStyle.DropDownList;
-            cboCrop.Items.AddRange(new object[] { "圆形", "正方形" });
-            cboCrop.SelectedIndex = Settings.Crop;
-            StyleCombo(cboCrop);
-
-            NeoButton btnDef = new NeoButton(); btnDef.Text = "恢复默认圆点"; btnDef.Location = new Point(218, 384); btnDef.Size = new Size(88, 34);
-            btnDef.Font = new Font("Microsoft YaHei", 8f);
+            Label l9 = RowLabel("图案裁剪形状", MX + PAD, y + 133);
+            LinkLabel btnDef = new LinkLabel();
+            btnDef.Text = "恢复默认圆点"; btnDef.AutoSize = true;
+            btnDef.Location = new Point(RX - 84, y + 136);
+            btnDef.LinkColor = Pal.Green; btnDef.ActiveLinkColor = Pal.GreenHover;
+            btnDef.LinkBehavior = LinkBehavior.HoverUnderline;
             btnDef.Click += delegate
             {
                 // Deletion is deferred to 确定 (and then goes to the recycle bin),
@@ -775,18 +968,31 @@ namespace ImeCursorDot
                 pendingClear = true; pendingZh = null; pendingEn = null;
                 btnImgZh.Text = "待恢复默认"; btnImgEn.Text = "待恢复默认";
             };
+            FlatCombo cboCrop = new FlatCombo();
+            cboCrop.Items.AddRange(new object[] { "圆形", "正方形" });
+            cboCrop.SelectedIndex = Settings.Crop;
+            cboCrop.Location = new Point(btnDef.Location.X - 8 - 80, y + 130); cboCrop.Width = 80;
+            AddBorder(cboCrop);
 
+            // ---- 底部操作栏 ----
             LinkLabel lnk = new LinkLabel();
             lnk.Text = "项目主页与更新下载（GitHub）";
-            lnk.Location = new Point(16, 428); lnk.AutoSize = true;
-            lnk.LinkColor = Neo.Rind; lnk.ActiveLinkColor = Color.FromArgb(150, 70, 90);
+            lnk.Location = new Point(MX, DivY + 20); lnk.AutoSize = true;
+            lnk.LinkColor = Pal.Green; lnk.ActiveLinkColor = Pal.GreenHover;
+            lnk.LinkBehavior = LinkBehavior.HoverUnderline;
             lnk.LinkClicked += delegate
             {
                 try { System.Diagnostics.Process.Start("https://github.com/bigbigee/CursorElf"); }
                 catch { }
             };
 
-            NeoButton ok = new NeoButton(); ok.Primary = true; ok.Text = "确定"; ok.Location = new Point(60, 458); ok.Size = new Size(80, 32);
+            FlatBtn cancel = new FlatBtn(); cancel.Kind = BtnKind.Ghost; cancel.Text = "取消";
+            cancel.Location = new Point(FW - MX - 88 - 10 - 80, DivY + 14); cancel.Size = new Size(80, 34);
+            cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
+
+            FlatBtn ok = new FlatBtn(); ok.Kind = BtnKind.Primary; ok.Text = "确定";
+            ok.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+            ok.Location = new Point(FW - MX - 88, DivY + 14); ok.Size = new Size(88, 34);
             ok.Click += delegate
             {
                 bool imgFail = false;
@@ -802,41 +1008,87 @@ namespace ImeCursorDot
                 Settings.Zh = pickZh; Settings.En = pickEn;
                 Settings.Size = (int)numSize.Value; Settings.Pos = cboPos.SelectedIndex;
                 Settings.Dx = (int)numDx.Value; Settings.Dy = (int)numDy.Value;
-                Settings.Speed = (int)numSpeed.Value;
-                Settings.Opacity = (int)numOpacity.Value;
+                Settings.Speed = sldSpeed.Value;
+                Settings.Opacity = sldOpacity.Value;
                 Settings.Dance = chkDance.Checked;
                 Settings.Crop = cboCrop.SelectedIndex;
                 DialogResult = DialogResult.OK;
                 Close();
             };
-            NeoButton cancel = new NeoButton(); cancel.Text = "取消"; cancel.Location = new Point(180, 458); cancel.Size = new Size(80, 32);
-            cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
 
-            Controls.Add(l1); Controls.Add(btnZh);
+            Controls.Add(title); Controls.Add(close);
+            Controls.Add(g1); Controls.Add(l1); Controls.Add(btnZh);
             Controls.Add(l2); Controls.Add(btnEn);
             Controls.Add(l3); Controls.Add(numSize);
-            Controls.Add(l4); Controls.Add(cboPos);
+            Controls.Add(g2); Controls.Add(l4); Controls.Add(cboPos);
             Controls.Add(l5); Controls.Add(numDx);
             Controls.Add(l6); Controls.Add(numDy);
-            Controls.Add(l10); Controls.Add(numSpeed);
-            Controls.Add(l11); Controls.Add(numOpacity);
-            Controls.Add(l12); Controls.Add(chkDance);
+            Controls.Add(l10); Controls.Add(sldSpeed); Controls.Add(valSpeed);
+            Controls.Add(l11); Controls.Add(sldOpacity); Controls.Add(valOpacity);
+            Controls.Add(g3); Controls.Add(l12); Controls.Add(chkDance);
             Controls.Add(l7); Controls.Add(btnImgZh);
             Controls.Add(l8); Controls.Add(btnImgEn);
             Controls.Add(l9); Controls.Add(cboCrop); Controls.Add(btnDef);
             Controls.Add(lnk);
-            Controls.Add(ok); Controls.Add(cancel);
+            Controls.Add(cancel); Controls.Add(ok);
             AcceptButton = ok; CancelButton = cancel;
+        }
+
+        void OnDragBar(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            ReleaseCapture();
+            SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); // WM_NCLBUTTONDOWN / HTCAPTION
+        }
+
+        Label GroupTitle(string text, int ty)
+        {
+            Label l = new Label();
+            l.Text = text; l.AutoSize = true; l.Location = new Point(MX + PAD, ty);
+            l.ForeColor = Pal.Title; l.BackColor = Color.Transparent;
+            l.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+            return l;
+        }
+
+        Label RowLabel(string text, int x, int y)
+        {
+            Label l = new Label();
+            l.Text = text; l.AutoSize = true; l.Location = new Point(x, y);
+            l.ForeColor = Pal.TextSub; l.BackColor = Color.Transparent;
+            return l;
+        }
+
+        void AddBorder(Control c)
+        {
+            fieldBorders.Add(new Rectangle(c.Location.X - 4, c.Location.Y - 2, c.Width + 8, c.Height + 4));
         }
 
         static void StyleField(NumericUpDown n)
         {
-            n.BackColor = Neo.Face; n.ForeColor = Neo.Ink; n.BorderStyle = BorderStyle.None;
+            n.BackColor = Pal.Card; n.ForeColor = Pal.Text;
+            n.BorderStyle = BorderStyle.None;
         }
 
-        static void StyleCombo(ComboBox c)
+        protected override void OnPaint(PaintEventArgs e)
         {
-            c.FlatStyle = FlatStyle.Flat; c.BackColor = Neo.Face; c.ForeColor = Neo.Ink;
+            base.OnPaint(e);
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            DrawCard(g, Card1Y, Card1H);
+            DrawCard(g, Card2Y, Card2H);
+            DrawCard(g, Card3Y, Card3H);
+            using (Pen p = new Pen(Pal.Divider)) g.DrawLine(p, MX, DivY, FW - MX, DivY);
+            using (Pen p = new Pen(Pal.InputBrd))
+                foreach (Rectangle r in fieldBorders)
+                    using (GraphicsPath pth = Pal.RoundPath(r, 8)) g.DrawPath(p, pth);
+            Pal.DrawRound(g, new Rectangle(0, 0, FW - 1, FH - 1), 14, Pal.Border, 1f);
+        }
+
+        static void DrawCard(Graphics g, int cy, int ch)
+        {
+            Rectangle r = new Rectangle(MX, cy, CW, ch);
+            Pal.FillRound(g, r, 12, Pal.Card);
+            Pal.DrawRound(g, r, 12, Pal.Divider, 1f);
         }
 
         static Color Pick(Color current)
@@ -903,41 +1155,7 @@ namespace ImeCursorDot
             overlay = new OverlayForm();
             trayIcon = LoadAppIcon();
 
-            ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Renderer = new MangosteenRenderer();
-            menu.Font = new Font("Microsoft YaHei UI", 9.5f);
-
-            ToolStripMenuItem autostart = new ToolStripMenuItem("开机自动启动");
-            autostart.Click += delegate
-            {
-                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RUN_KEY, true))
-                {
-                    if (k == null) return;
-                    if (k.GetValue(APP_NAME) == null)
-                        k.SetValue(APP_NAME, "\"" + Application.ExecutablePath + "\"");
-                    else
-                        k.DeleteValue(APP_NAME, false);
-                    autostart.Checked = k.GetValue(APP_NAME) != null;
-                }
-            };
-            ToolStripMenuItem markZh = new ToolStripMenuItem("当前实为中文（校正颜色）");
-            markZh.Click += delegate { Native.MirrorChinese = true; Native.MirrorDirty = true; };
-            ToolStripMenuItem markEn = new ToolStripMenuItem("当前实为英文（校正颜色）");
-            markEn.Click += delegate { Native.MirrorChinese = false; Native.MirrorDirty = true; };
-            ToolStripMenuItem settings = new ToolStripMenuItem("设置（颜色·大小·速度·外观）…");
-            settings.Click += delegate
-            {
-                using (SettingsForm sf = new SettingsForm())
-                {
-                    if (sf.ShowDialog() == DialogResult.OK) ApplySettings();
-                }
-            };
-            ToolStripMenuItem exit = new ToolStripMenuItem("退出");
-            exit.Click += delegate { Application.Exit(); };
-            menu.Items.AddRange(new ToolStripItem[] {
-                autostart, new ToolStripSeparator(),
-                markZh, markEn, new ToolStripSeparator(),
-                settings, new ToolStripSeparator(), exit });
+            ContextMenuStrip menu = BuildMenu(this);
 
             tray = new NotifyIcon();
             tray.Icon = trayIcon;
@@ -948,7 +1166,6 @@ namespace ImeCursorDot
             timer = new System.Windows.Forms.Timer();
             timer.Interval = 25;
             timer.Tick += Tick;
-            autostart.Checked = AutoStartEnabled();
             lastActivityTick = Environment.TickCount;
             lastMouseEvtTick = Environment.TickCount;
             timer.Start();
@@ -972,6 +1189,67 @@ namespace ImeCursorDot
             }
             catch (Exception) { }
             return Native.MakeIcon(16, Settings.Zh);
+        }
+
+        internal static ContextMenuStrip BuildMenu(AppContext ctx)
+        {
+            ContextMenuStrip menu = new ContextMenuStrip();
+            menu.Renderer = new CardMenuRenderer();
+            menu.Font = new Font("Microsoft YaHei UI", 9.5f);
+            menu.ImageScalingSize = new Size(16, 16);
+            menu.Padding = new Padding(4, 6, 4, 6);
+            menu.Layout += delegate
+            {
+                Region old = menu.Region;
+                menu.Region = new Region(Pal.RoundPath(new Rectangle(0, 0, menu.Width, menu.Height), 10));
+                if (old != null) old.Dispose();
+            };
+
+            ToolStripMenuItem autostart = new ToolStripMenuItem("开机自启动");
+            autostart.Image = MenuIcons.Check(ctx != null && AutoStartEnabled());
+            autostart.Click += delegate
+            {
+                if (ctx == null) return;
+                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RUN_KEY, true))
+                {
+                    if (k == null) return;
+                    if (k.GetValue(APP_NAME) == null)
+                        k.SetValue(APP_NAME, "\"" + Application.ExecutablePath + "\"");
+                    else
+                        k.DeleteValue(APP_NAME, false);
+                    bool on = k.GetValue(APP_NAME) != null;
+                    autostart.Checked = on;
+                    autostart.Image = MenuIcons.Check(on);
+                }
+            };
+            ToolStripMenuItem header = new ToolStripMenuItem("校正");
+            header.Enabled = false;
+            ToolStripMenuItem markZh = new ToolStripMenuItem("当前为中文");
+            markZh.Image = MenuIcons.Dot(Settings.Zh);
+            markZh.Click += delegate { if (ctx != null) { Native.MirrorChinese = true; Native.MirrorDirty = true; } };
+            ToolStripMenuItem markEn = new ToolStripMenuItem("当前为英文");
+            markEn.Image = MenuIcons.Dot(Settings.En);
+            markEn.Click += delegate { if (ctx != null) { Native.MirrorChinese = false; Native.MirrorDirty = true; } };
+            ToolStripMenuItem settings = new ToolStripMenuItem("设置");
+            settings.Image = MenuIcons.Glyph("\uE713");
+            settings.Click += delegate
+            {
+                if (ctx == null) return;
+                using (SettingsForm sf = new SettingsForm())
+                {
+                    if (sf.ShowDialog() == DialogResult.OK) ctx.ApplySettings();
+                }
+            };
+            ToolStripMenuItem exit = new ToolStripMenuItem("退出");
+            exit.Image = MenuIcons.Glyph("\uE7E8");
+            exit.Click += delegate { Application.Exit(); };
+            foreach (ToolStripMenuItem it in new ToolStripMenuItem[] { autostart, header, markZh, markEn, settings, exit })
+                it.Padding = new Padding(6, 4, 10, 4);
+            menu.Items.AddRange(new ToolStripItem[] {
+                autostart, new ToolStripSeparator(),
+                header, markZh, markEn, new ToolStripSeparator(),
+                settings, new ToolStripSeparator(), exit });
+            return menu;
         }
 
         void ApplySettings()

@@ -14,6 +14,23 @@ class UiSnap
         Settings.Load();
         if (args.Length > 1) Settings.Dance = args[1] == "on";
         Application.EnableVisualStyles();
+        if (args.Length > 1 && args[1] == "menu")
+        {
+            using (ContextMenuStrip m = ImeCursorDot.AppContext.BuildMenu(null))
+            {
+                m.Show(new Point(-32000, 0));
+                for (int i = 0; i < 30; i++) Application.DoEvents();
+                Thread.Sleep(250);
+                for (int i = 0; i < 30; i++) Application.DoEvents();
+                Bitmap bmp = new Bitmap(m.Width, m.Height);
+                m.DrawToBitmap(bmp, new Rectangle(0, 0, m.Width, m.Height));
+                bmp.Save(outPath, ImageFormat.Png);
+                bmp.Dispose();
+                m.Hide();
+            }
+            Console.WriteLine("SAVED " + outPath);
+            return;
+        }
         using (SettingsForm f = new SettingsForm())
         {
             f.StartPosition = FormStartPosition.Manual;
