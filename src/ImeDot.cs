@@ -230,7 +230,7 @@ namespace ImeCursorDot
                 {
                     BlendOp = AC_SRC_OVER,
                     BlendFlags = 0,
-                    SourceConstantAlpha = 235,
+                    SourceConstantAlpha = (byte)(Settings.Opacity * 255 / 100),
                     AlphaFormat = AC_SRC_ALPHA
                 };
                 UpdateLayeredWindow(hwnd, screenDc, IntPtr.Zero, ref sz, memDc, ref src, 0, ref blend, ULW_ALPHA);
@@ -269,6 +269,8 @@ namespace ImeCursorDot
         public static int Dy = 12; // 垂直间距（像素）
         public static int Crop = 0; // 0=圆形 1=正方形（自定义图案裁剪形状）
         public static int Speed = 10; // 跟随速度 1(慢)~10(即时)
+        public static int Opacity = 92; // 圆点不透明度百分比 20~100
+        public static bool Dance = true; // 闲置跳舞开关（光标 1 分钟不动触发）
 
         static string DataDir
         {
@@ -386,6 +388,8 @@ namespace ImeCursorDot
                     else if (k == "dy") { if (int.TryParse(v, out num) && num >= 0 && num <= 200) Dy = num; }
                     else if (k == "crop") { if (int.TryParse(v, out num) && num >= 0 && num <= 1) Crop = num; }
                     else if (k == "speed") { if (int.TryParse(v, out num) && num >= 1 && num <= 10) Speed = num; }
+                    else if (k == "opacity") { if (int.TryParse(v, out num) && num >= 20 && num <= 100) Opacity = num; }
+                    else if (k == "dance") { if (int.TryParse(v, out num) && num >= 0 && num <= 1) Dance = num == 1; }
                 }
             }
             catch (Exception) { }
@@ -405,7 +409,9 @@ namespace ImeCursorDot
                     "dx=" + Dx + "\r\n" +
                     "dy=" + Dy + "\r\n" +
                     "crop=" + Crop + "\r\n" +
-                    "speed=" + Speed + "\r\n");
+                    "speed=" + Speed + "\r\n" +
+                    "opacity=" + Opacity + "\r\n" +
+                    "dance=" + (Dance ? "1" : "0") + "\r\n");
             }
             catch (Exception) { }
         }
@@ -438,6 +444,49 @@ namespace ImeCursorDot
         }
     }
 
+    class MangosteenRenderer : ToolStripProfessionalRenderer
+    {
+        static readonly Color Rind = Color.FromArgb(109, 47, 63);    // 山竹果皮深紫
+        static readonly Color Flesh = Color.FromArgb(250, 243, 231); // 果肉米白
+        static readonly Color Blush = Color.FromArgb(240, 223, 212); // 选中淡粉
+        static readonly Color Ink = Color.FromArgb(74, 35, 51);
+
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+        {
+            using (SolidBrush b = new SolidBrush(Flesh)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+        }
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            using (Pen p = new Pen(Rind)) e.Graphics.DrawRectangle(p, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+        }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.Selected) return;
+            Rectangle r = new Rectangle(1, 0, e.Item.Width - 2, e.Item.Height - 1);
+            using (SolidBrush b = new SolidBrush(Blush)) e.Graphics.FillRectangle(b, r);
+            using (SolidBrush b = new SolidBrush(Rind)) e.Graphics.FillRectangle(b, new Rectangle(2, r.Top + 3, 3, r.Height - 6));
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            e.TextColor = e.Item.Selected ? Rind : (e.Item.Enabled ? Ink : Color.Gray);
+            base.OnRenderItemText(e);
+        }
+
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            int y = e.Item.Height / 2;
+            using (Pen p = new Pen(Color.FromArgb(130, Rind))) e.Graphics.DrawLine(p, 10, y, e.Item.Width - 10, y);
+        }
+
+        protected override void OnRenderImageMargin(ToolStripRenderEventArgs e)
+        {
+            using (SolidBrush b = new SolidBrush(Flesh)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+        }
+    }
+
     class SettingsForm : Form
     {
         Color pickZh, pickEn;
@@ -452,7 +501,7 @@ namespace ImeCursorDot
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(310, 398);
+            ClientSize = new Size(310, 498);
             Font = new Font("Microsoft YaHei", 9f);
 
             Label l1 = new Label(); l1.Text = "中文时颜色"; l1.Location = new Point(16, 16); l1.AutoSize = true;
@@ -492,8 +541,16 @@ namespace ImeCursorDot
             numSpeed.Location = new Point(140, 216); numSpeed.Width = 60;
             numSpeed.Minimum = 1; numSpeed.Maximum = 10; numSpeed.Value = Settings.Speed;
 
-            Label l7 = new Label(); l7.Text = "中文图案"; l7.Location = new Point(16, 254); l7.AutoSize = true;
-            Button btnImgZh = new Button(); btnImgZh.Location = new Point(140, 250); btnImgZh.Size = new Size(120, 26);
+            Label l11 = new Label(); l11.Text = "不透明度(%)"; l11.Location = new Point(16, 254); l11.AutoSize = true;
+            NumericUpDown numOpacity = new NumericUpDown();
+            numOpacity.Location = new Point(140, 250); numOpacity.Width = 60;
+            numOpacity.Minimum = 20; numOpacity.Maximum = 100; numOpacity.Value = Settings.Opacity;
+
+            CheckBox chkDance = new CheckBox(); chkDance.Text = "闲置 1 分钟时圆点跳舞"; chkDance.Location = new Point(140, 286); chkDance.AutoSize = true;
+            chkDance.Checked = Settings.Dance;
+
+            Label l7 = new Label(); l7.Text = "中文图案"; l7.Location = new Point(16, 322); l7.AutoSize = true;
+            Button btnImgZh = new Button(); btnImgZh.Location = new Point(140, 318); btnImgZh.Size = new Size(120, 26);
             btnImgZh.Text = System.IO.File.Exists(Settings.ImagePath(true)) ? "已选择(点击更换)" : "选择图片…";
             string pendingZh = null, pendingEn = null;
             btnImgZh.Click += delegate
@@ -502,8 +559,8 @@ namespace ImeCursorDot
                 if (f != null) { pendingZh = f; btnImgZh.Text = "已选择(点击更换)"; }
             };
 
-            Label l8 = new Label(); l8.Text = "英文图案"; l8.Location = new Point(16, 288); l8.AutoSize = true;
-            Button btnImgEn = new Button(); btnImgEn.Location = new Point(140, 284); btnImgEn.Size = new Size(120, 26);
+            Label l8 = new Label(); l8.Text = "英文图案"; l8.Location = new Point(16, 356); l8.AutoSize = true;
+            Button btnImgEn = new Button(); btnImgEn.Location = new Point(140, 352); btnImgEn.Size = new Size(120, 26);
             btnImgEn.Text = System.IO.File.Exists(Settings.ImagePath(false)) ? "已选择(点击更换)" : "选择图片…";
             btnImgEn.Click += delegate
             {
@@ -511,14 +568,14 @@ namespace ImeCursorDot
                 if (f != null) { pendingEn = f; btnImgEn.Text = "已选择(点击更换)"; }
             };
 
-            Label l9 = new Label(); l9.Text = "图案裁剪形状"; l9.Location = new Point(16, 324); l9.AutoSize = true;
+            Label l9 = new Label(); l9.Text = "图案裁剪形状"; l9.Location = new Point(16, 392); l9.AutoSize = true;
             ComboBox cboCrop = new ComboBox();
-            cboCrop.Location = new Point(140, 320); cboCrop.Width = 80;
+            cboCrop.Location = new Point(140, 388); cboCrop.Width = 80;
             cboCrop.DropDownStyle = ComboBoxStyle.DropDownList;
             cboCrop.Items.AddRange(new object[] { "圆形", "正方形" });
             cboCrop.SelectedIndex = Settings.Crop;
 
-            Button btnDef = new Button(); btnDef.Text = "恢复默认圆点"; btnDef.Location = new Point(230, 318); btnDef.Size = new Size(72, 30);
+            Button btnDef = new Button(); btnDef.Text = "恢复默认圆点"; btnDef.Location = new Point(230, 386); btnDef.Size = new Size(72, 30);
             btnDef.Click += delegate
             {
                 Settings.ClearImages();
@@ -526,13 +583,24 @@ namespace ImeCursorDot
                 pendingZh = null; pendingEn = null;
             };
 
-            Button ok = new Button(); ok.Text = "确定"; ok.Location = new Point(60, 360); ok.Size = new Size(80, 28);
+            LinkLabel lnk = new LinkLabel();
+            lnk.Text = "项目主页与更新下载（GitHub）";
+            lnk.Location = new Point(16, 428); lnk.AutoSize = true;
+            lnk.LinkClicked += delegate
+            {
+                try { System.Diagnostics.Process.Start("https://github.com/bigbigee/CursorElf"); }
+                catch { }
+            };
+
+            Button ok = new Button(); ok.Text = "确定"; ok.Location = new Point(60, 460); ok.Size = new Size(80, 28);
             ok.Click += delegate
             {
                 Settings.Zh = pickZh; Settings.En = pickEn;
                 Settings.Size = (int)numSize.Value; Settings.Pos = cboPos.SelectedIndex;
                 Settings.Dx = (int)numDx.Value; Settings.Dy = (int)numDy.Value;
                 Settings.Speed = (int)numSpeed.Value;
+                Settings.Opacity = (int)numOpacity.Value;
+                Settings.Dance = chkDance.Checked;
                 Settings.Crop = cboCrop.SelectedIndex;
                 if (pendingZh != null) Settings.SetImage(true, pendingZh);
                 if (pendingEn != null) Settings.SetImage(false, pendingEn);
@@ -540,7 +608,7 @@ namespace ImeCursorDot
                 DialogResult = DialogResult.OK;
                 Close();
             };
-            Button cancel = new Button(); cancel.Text = "取消"; cancel.Location = new Point(180, 360); cancel.Size = new Size(80, 28);
+            Button cancel = new Button(); cancel.Text = "取消"; cancel.Location = new Point(180, 460); cancel.Size = new Size(80, 28);
             cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
 
             Controls.Add(l1); Controls.Add(btnZh);
@@ -550,9 +618,12 @@ namespace ImeCursorDot
             Controls.Add(l5); Controls.Add(numDx);
             Controls.Add(l6); Controls.Add(numDy);
             Controls.Add(l10); Controls.Add(numSpeed);
+            Controls.Add(l11); Controls.Add(numOpacity);
+            Controls.Add(chkDance);
             Controls.Add(l7); Controls.Add(btnImgZh);
             Controls.Add(l8); Controls.Add(btnImgEn);
             Controls.Add(l9); Controls.Add(cboCrop); Controls.Add(btnDef);
+            Controls.Add(lnk);
             Controls.Add(ok); Controls.Add(cancel);
             AcceptButton = ok; CancelButton = cancel;
         }
@@ -583,8 +654,7 @@ namespace ImeCursorDot
         readonly OverlayForm overlay;
         readonly System.Windows.Forms.Timer timer;
         readonly NotifyIcon tray;
-        Icon iconZh;
-        Icon iconEn;
+        readonly Icon trayIcon;
         bool? lastChinese = null;
         int tickCount = 0;
 
@@ -596,16 +666,30 @@ namespace ImeCursorDot
         readonly bool[] lastDown = new bool[256];
         Rectangle lastBounds = Rectangle.Empty;
 
+        int targetX, targetY;
+
+        // Idle dance: after 60s without any mouse movement the dot orbits its
+        // anchor until the mouse moves again. 25ms ticks x 2400 = 60s.
+        const int IDLE_TICKS = 2400;
+        int idleTicks;
+        bool dancing;
+        double dancePhase;
+        int anchorX, anchorY;
+        Native.POINT lastCursor;
+
         const string RUN_KEY = @"Software\Microsoft\Windows\CurrentVersion\Run";
         const string APP_NAME = "ImeCursorDot";
 
         public AppContext()
         {
             overlay = new OverlayForm();
-            iconZh = Native.MakeIcon(16, Settings.Zh);
-            iconEn = Native.MakeIcon(16, Settings.En);
+            trayIcon = LoadAppIcon();
 
-            MenuItem autostart = new MenuItem("开机自动启动");
+            ContextMenuStrip menu = new ContextMenuStrip();
+            menu.Renderer = new MangosteenRenderer();
+            menu.Font = new Font("Microsoft YaHei UI", 9.5f);
+
+            ToolStripMenuItem autostart = new ToolStripMenuItem("开机自动启动");
             autostart.Click += delegate
             {
                 using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RUN_KEY, true))
@@ -618,13 +702,11 @@ namespace ImeCursorDot
                     autostart.Checked = k.GetValue(APP_NAME) != null;
                 }
             };
-            MenuItem exit = new MenuItem("退出");
-            exit.Click += delegate { Application.Exit(); };
-            MenuItem markZh = new MenuItem("当前实为中文（校正颜色）");
+            ToolStripMenuItem markZh = new ToolStripMenuItem("当前实为中文（校正颜色）");
             markZh.Click += delegate { Native.MirrorChinese = true; Native.MirrorDirty = true; };
-            MenuItem markEn = new MenuItem("当前实为英文（校正颜色）");
+            ToolStripMenuItem markEn = new ToolStripMenuItem("当前实为英文（校正颜色）");
             markEn.Click += delegate { Native.MirrorChinese = false; Native.MirrorDirty = true; };
-            MenuItem settings = new MenuItem("设置（颜色·大小·位置）…");
+            ToolStripMenuItem settings = new ToolStripMenuItem("设置（颜色·大小·速度·外观）…");
             settings.Click += delegate
             {
                 using (SettingsForm sf = new SettingsForm())
@@ -632,9 +714,16 @@ namespace ImeCursorDot
                     if (sf.ShowDialog() == DialogResult.OK) ApplySettings();
                 }
             };
+            ToolStripMenuItem exit = new ToolStripMenuItem("退出");
+            exit.Click += delegate { Application.Exit(); };
+            menu.Items.AddRange(new ToolStripItem[] {
+                autostart, new ToolStripSeparator(),
+                markZh, markEn, new ToolStripSeparator(),
+                settings, new ToolStripSeparator(), exit });
+
             tray = new NotifyIcon();
-            tray.Icon = iconZh;
-            tray.ContextMenu = new ContextMenu(new MenuItem[] { autostart, new MenuItem("-"), markZh, markEn, new MenuItem("-"), settings, new MenuItem("-"), exit });
+            tray.Icon = trayIcon;
+            tray.ContextMenuStrip = menu;
             tray.Text = "山竹 Cursor Elf  绿=中文  红=英文";
             tray.Visible = true;
 
@@ -654,14 +743,20 @@ namespace ImeCursorDot
             overlay.Show();
         }
 
+        static Icon LoadAppIcon()
+        {
+            try
+            {
+                Icon ico = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (ico != null) return ico;
+            }
+            catch (Exception) { }
+            return Native.MakeIcon(16, Settings.Zh);
+        }
+
         void ApplySettings()
         {
             overlay.ClientSize = new Size(Settings.Size, Settings.Size);
-            Icon oldZh = iconZh, oldEn = iconEn;
-            iconZh = Native.MakeIcon(16, Settings.Zh);
-            iconEn = Native.MakeIcon(16, Settings.En);
-            tray.Icon = lastChinese == false ? iconEn : iconZh;
-            oldZh.Dispose(); oldEn.Dispose();
             lastChinese = null;
             Native.POINT c;
             if (Native.GetCursorPos(out c)) MoveDot(c.X, c.Y);
@@ -713,7 +808,11 @@ namespace ImeCursorDot
                 // diverges from desktop coordinates on the secondary screen. GetCursorPos
                 // returns coordinates in the same space as the overlay window position.
                 Native.POINT c;
-                if (Native.GetCursorPos(out c)) MoveDot(c.X, c.Y);
+                if (Native.GetCursorPos(out c) && (c.X != lastCursor.X || c.Y != lastCursor.Y))
+                {
+                    lastCursor = c;
+                    CursorMoved(c.X, c.Y);
+                }
             }
             return (int)Native.CallNextHookEx(mouseHook, nCode, wParam, lParam);
         }
@@ -733,15 +832,13 @@ namespace ImeCursorDot
                 overlay.Location = new Point(x, y);
         }
 
-        int targetX, targetY;
-
         // Linear easing toward the cursor each tick; Speed 10 means "snap instantly".
         void FollowStep()
         {
             if (Settings.Speed >= 10) return;
             int x = overlay.Left, y = overlay.Top;
             if (x == targetX && y == targetY) return;
-            double f = Settings.Speed / 10.0;
+            double f = Math.Min(1.0, Settings.Speed / 2.0);
             int nx = x + (int)Math.Round((targetX - x) * f);
             int ny = y + (int)Math.Round((targetY - y) * f);
             if (Math.Abs(targetX - nx) <= 1) nx = targetX;
@@ -792,13 +889,51 @@ namespace ImeCursorDot
             }
         }
 
+        void CursorMoved(int x, int y)
+        {
+            idleTicks = 0;
+            dancing = false;
+            MoveDot(x, y);
+        }
+
+        void DanceStep()
+        {
+            dancePhase += 0.11;
+            int s = Settings.Size;
+            int r = s + 10 + (int)Math.Round(4 * Math.Sin(dancePhase * 1.7));
+            int x = anchorX + (int)Math.Round(r * Math.Cos(dancePhase));
+            int y = anchorY + (int)Math.Round(r * 0.55 * Math.Sin(dancePhase * 2));
+            x = Math.Min(Math.Max(x, lastBounds.Left), lastBounds.Right - s - 2);
+            y = Math.Min(Math.Max(y, lastBounds.Top), lastBounds.Bottom - s - 2);
+            overlay.Location = new Point(x, y);
+        }
+
         void Tick(object sender, EventArgs e)
         {
             DetectShiftTap();
 
             Native.POINT c;
-            if (Native.GetCursorPos(out c)) MoveDot(c.X, c.Y);
-            FollowStep();
+            if (Native.GetCursorPos(out c) && (c.X != lastCursor.X || c.Y != lastCursor.Y))
+            {
+                lastCursor = c;
+                CursorMoved(c.X, c.Y);
+            }
+
+            if (dancing)
+            {
+                DanceStep();
+            }
+            else
+            {
+                if (idleTicks < IDLE_TICKS) idleTicks++;
+                if (idleTicks >= IDLE_TICKS && Settings.Dance)
+                {
+                    dancing = true;
+                    anchorX = targetX; anchorY = targetY;
+                    dancePhase = 0;
+                }
+                else FollowStep();
+            }
 
             // Keep the dot above other windows: re-assert topmost z-order every tick.
             Native.SetWindowPos(overlay.Handle, Native.HWND_TOPMOST, 0, 0, 0, 0,
@@ -811,7 +946,6 @@ namespace ImeCursorDot
                 if (lastChinese == null || lastChinese.Value != zh)
                 {
                     Native.PaintDot(overlay.Handle, Settings.Size, zh);
-                    tray.Icon = zh ? iconZh : iconEn;
                     lastChinese = zh;
                 }
             }

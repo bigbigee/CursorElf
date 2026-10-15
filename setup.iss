@@ -1,5 +1,5 @@
 #define MyAppName "山竹 Cursor Elf"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 
 [Setup]
 AppName={#MyAppName}
@@ -10,7 +10,7 @@ DefaultDirName=D:\山竹CursorElf
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
 OutputDir=dist
-OutputBaseFilename=山竹CursorElf-setup-1.2.0
+OutputBaseFilename=山竹CursorElf-setup-1.3.0
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
